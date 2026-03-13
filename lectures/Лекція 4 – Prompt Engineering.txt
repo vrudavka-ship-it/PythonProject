@@ -1,0 +1,473 @@
+Prompt Engineering
+техніки
+Заняття 4
+Multi-Agent Systems
+Лектор
+Владислав Шанін
+[Час: ~1 хв]
+
+Вітаємо всіх! Сьогодні — четверта лекція курсу "Мультиагентні системи".
+
+Тема: Prompt Engineering — як КЕРУВАТИ агентами через промпти.
+
+Лекція 2 — архітектура агента (LLM + memory + tools). Лекція 3 — створення агента з LangChain. Сьогодні — як написати промпт, щоб агент робив те, що треба.
+
+→ Перехід: давайте подивимося, що ви будете вміти після цієї лекції.
+
+Базові техніки: Zero-Shot, Few-Shot, Chain-of-Thought
+Просунуті патерни: Self-Consistency, Self-Reflection, RAG
+Reasoning + Acting: ReAct та Tree-of-Thoughts
+Крихкість промптів та eval-driven підхід
+Загальні правила промптингу для MAS
+ПЛАН ЛЕКЦІЇ
+[Час: ~2 хв]
+
+Пройдемося по очікуваних результатах. Після цієї лекції ви будете:
+1. Знати 4 базові компоненти промпту і вміти будувати system prompts
+2. Розуміти різницю між техніками — від Zero-Shot до CoT
+3. Знати ReAct і ToT — ключові патерни для агентів
+4. Розуміти chaining і reflection — як з'єднувати агентів в pipeline
+5. І головне — зможете написати ReAct інструкцію для свого use case (це буде ДЗ)
+
+Лекція 2 — архітектура агента (LLM + memory + tools). Лекція 3 — створення агента з LangChain. Сьогодні — як КЕРУВАТИ агентом через промпт.
+
+🙋 Запитання до аудиторії: "Хто вже писав system prompts? Для чого?"
+
+→ Перехід: окей, почнемо з базового — що таке промптінг у контексті мультиагентних систем.
+
+PROMPTING У MAS: КОМПОНЕНТИ
+Промпт = конституція + робоча інструкція + обмеження для агента
+INSTRUCTION
+Що агент робить — роль, задача
+You are a customer support classifier. Categorize the incoming ticket
+CONTEXT
+Знання та контекст середовища
+Our company sells SaaS PM tools. Tiers: Billing, Technical, Feature Request, Bug Report
+INPUT DATA
+Вхідні дані для обробки
+Ticket: "I was charged twice for my Pro subscription this month."
+OUTPUT FORMAT
+Формат та структура відповіді
+JSON: {"category": "...", "priority": "high|medium|low", "summary": "..."}
+[Час: ~3 хв]
+
+Для звичайного чатбота промпт — це просто питання. Але для АГЕНТА промпт — це набагато більше.
+
+Промпт = конституція агента. Він визначає ЩО агент робить, ЯК думає, З КИМ спілкується, і КОЛИ зупиняється.
+
+💡 Аналогія: уявіть, що ви наймаєте працівника. Ви ж не скажете "ну, роби щось корисне". Ви даєте посадову інструкцію — роль, обов'язки, обмеження, формат звітності.
+
+Ключовий інсайт: одна й та сама LLM (наприклад, Claude Sonnet 4.6) поводиться ЗОВСІМ по-різному залежно від system prompt. Planner — планує. Coder — пише код. Reviewer — критикує. Та сама модель, різні "особистості".
+
+→ Перехід: давайте розберемо, з чого складається промпт.
+
+## IdentityYou are a Task Planner agent in a software development team.## Capabilities
+Delegate to: Coder, Tester, Reviewer## GoalsCreate step-by-step execution plan.
+Each step: which agent + input.## Constraints- Never write code yourself
+- Maximum 7 steps per plan- If ambiguous, ask for clarification## Output Format[{"step": 1, "agent": "Coder", "task": "..."}]
+SYSTEM PROMPT
+[Час: ~3 хв]
+
+Ось повний system prompt для Planner агента. Зверніть увагу на структуру:
+- Identity — хто ти
+- Capabilities — що ти вмієш (і кому делегуєш)
+- Goals — що потрібно зробити
+- Constraints — обмеження
+- Output Format — як відповідати
+
+Real-world приклад: Cline (VS Code agent) має system prompt ~11,000 символів! З розділенням Plan Mode / Act Mode. Можна знайти на PromptHub.
+
+💡 Жарт: "System prompt довший за код, який він генерує" — це нормально для production агентів.
+
+→ Перехід: а тепер — чому Output Format такий важливий для MAS.
+
+РОЗМИТИЙ vs КОНКРЕТНИЙ ПРОМПТ
+Конкретність > оригінальність. Позитивні інструкції > негативні.
+❌ РОЗМИТИЙ
+✅ КОНКРЕТНИЙ
+"Напиши щось про наш продукт"
+"Напиши опис PM-tool до 100 слів. Фокус: економія часу для менеджерів"
+"Не використовуй жаргон"
+"Пиши простою мовою, зрозумілою для нетехнічного менеджера"
+"Проаналізуй цей код"
+"Ти — Security Auditor. Знайди вразливості. Відповідай у JSON: {severity, issue, fix}"
+"Відповідай коротко"
+"Відповідь: 1-2 речення. Формат: [Категорія]: пояснення"
+"Будь корисним асистентом"
+"Ти — DevOps-агент. Діагностуй проблему, запропонуй kubectl-команду"
+[Час: ~3 хв]
+
+Три пари: від поганого до хорошого.
+
+Пара 1: "Напиши щось про продукт" vs конкретний промпт з обмеженнями. Різниця — конкретність.
+Пара 2: Негативні інструкції ("don't") vs позитивні ("do"). Моделі краще розуміють що РОБИТИ.
+Пара 3: "Проаналізуй код" vs повний agent-ready промпт з Role, Tools, Process, Constraints, Output Format.
+
+Третя колонка — це прогресія від промпту до AGENT промпту. Кожен наступний рівень додає структури.
+
+→ Перехід: а тепер порівняємо chatbot prompt з agent prompt.
+
+ПРОМПТІНГ ТЕХНІКИ
+[Час: ~2 хв]
+
+ReAct — це фундаментальний патерн для AI агентів. Це САМЕ ТЕ, що працювало на Лекції 3 у LangChain — під капотом завжди ReAct.
+
+Yao et al. (ICLR 2023): reasoning + actions в інтерливному форматі.
+
+Переваги над CoT: може дістати інформацію із зовнішнього світу (tools!)
+Переваги над Act-only: обґрунтовує кожну дію (Thought перед Action)
+
+Результати з paper: ALFWorld +34%, WebShop +10% з 1-2 few-shot.
+
+→ Перехід: давайте розберемо ReAct по компонентах.
+
+Модель отримує лише інструкцію — без жодного прикладу відповіді
+Приклад:
+Де використовувати:
+Класифікація — тікети, відгуки, пошта
+Переклад та сумаризація тексту
+Просте витягування даних (імена, дати, суми)
+
+Zero-shot — це baseline. Починай з нього, ускладнюй лише коли якість недостатня.
+ZERO-SHOT PROMPTING
+system: You are a support ticket classifier.
+        Categories: «Billing», «Bug», «Feature Request», «Other»
+        Reply with one category only.
+user:   Dashboard keeps crashing on export.
+ai:     Bug
+
+В інструкцію додаються приклади правильних відповідей — модель копіює патерн
+Приклад:
+FEW-SHOT PROMPTING
+system: You are a support ticket classifier.
+        Categories: «Billing», «Bug», «Feature Request», «Other»
+        Reply with one category only. Examples:
+        "I was charged twice"       → Billing
+        "Add dark mode"             → Feature Request
+        "App crashes on export"     → Bug
+user:   Team can't see shared dashboards
+ai:     Bug
+Best practices: 3–5 різноманітних прикладів в однаковому форматі
+
+Модель міркує покроково перед тим, як дати фінальну відповідь
+Приклад:
+CHAIN-OF-THOUGHT (CoT)
+system: You are a math tutor. Think step by step.
+        Show each reasoning step, then the answer.
+user:   Masks cost $2 each. 5+ get 20% off. 7 masks = ?
+ai:     Step 1: Base cost: 7 x $2 = $14
+        Step 2: 7 >= 5 → discount applies
+        Step 3: Discount: 20% of $14 = $2.80
+        Answer: $14 - $2.80 = $11.20
+Обмеження: лінійний reasoning, немає доступу до зовнішнього світу, може галюцинувати кроки
+
+Few-Shot + CoT: в прикладах показуємо не лише відповідь, а й хід міркувань
+Приклад (для coding-агента):
+FEW-SHOT CoT
+system: You are a backend developer. For each feature:
+        1) Clarify → 2) Data model → 3) API → 4) Code
+        Example:
+        User: "Add password reset"
+        1) Email-based reset with expiring token
+        2) reset_tokens(user_id, token, expires_at)
+        3) POST /reset-request, POST /reset-confirm
+        4) [code]
+user:   "Add authentication"
+ai:     1) OAuth2 or JWT? → JWT for stateless API
+        2) users(id, email, password_hash)
+        3) POST /login, POST /register, GET /me
+        4) [code]
+Приклад reasoning вчить агента структурувати свої дії
+
+SELF-CONSISTENCY
+Запускаємо той самий промпт N разів → обираємо найчастішу відповідь
+Приклад (3 запуски, temperature=0.7):
+system: You are a support ticket classifier.
+        Categories: Billing | Bug | Feature Request
+        Reply with one category only.
+user:   "My invoice shows wrong tax amount"
+── Run 1 ──────────────────────────────
+ai:     Billing
+── Run 2 ──────────────────────────────
+ai:     Bug
+── Run 3 ──────────────────────────────
+ai:     Billing
+── majority vote → Billing (2/3)
+Trade-off: N × вартість та latency, але вища точність
+Для MAS: N паралельних агентів + агент-агрегатор
+[Час: ~3 хв]
+
+Self-Consistency — це majority voting для LLM. Замість одного запуску робимо N запусків з temperature > 0 і беремо найпопулярнішу відповідь.
+
+Wang et al. (ICLR 2023): показали що це значно підвищує accuracy на reasoning задачах.
+
+Trade-off: N запусків = N × вартість, N × latency. Для production треба балансувати.
+
+Для MAS: можна запустити N паралельних агентів + один агент-агрегатор який збирає відповіді та голосує.
+
+💡 Аналогія: як в суді — 12 присяжних краще ніж один суддя для складних справ.
+
+→ Перехід: окей, ми покрили всі основні техніки. Як обрати правильну?
+
+SELF-REFLECTION
+Модель генерує відповідь → перечитує її → знаходить помилки → виправляє
+Приклад (2 виклики моделі в ланцюжку):
+── Виклик 1: згенеруй ────────────────
+system: You are a backend developer. Write code.
+user:   Write a login endpoint with JWT
+ai:     def login(email, pwd): ... return jwt.encode()
+
+── Виклик 2: перевір себе ─────────────
+system: Review this code for bugs, edge cases,
+        and security. List issues, then fix.
+user:   [ai response from the previous call]
+ai:     Issues: no rate limit, plain-text pwd, no exp
+        Fixed: bcrypt.hash(pwd) + exp=1h + limiter
+Ключова техніка для coding-агентів: generate → critique → refine
+[Час: ~3 хв]
+
+Self-Consistency — це majority voting для LLM. Замість одного запуску робимо N запусків з temperature > 0 і беремо найпопулярнішу відповідь.
+
+Wang et al. (ICLR 2023): показали що це значно підвищує accuracy на reasoning задачах.
+
+Trade-off: N запусків = N × вартість, N × latency. Для production треба балансувати.
+
+Для MAS: можна запустити N паралельних агентів + один агент-агрегатор який збирає відповіді та голосує.
+
+💡 Аналогія: як в суді — 12 присяжних краще ніж один суддя для складних справ.
+
+→ Перехід: окей, ми покрили всі основні техніки. Як обрати правильну?
+
+RAG-PROMPTING
+Перед генерацією шукаємо релевантні дані і вставляємо їх у промпт
+Приклад (support-агент з базою знань):
+── Крок 1: пошук (vector search) ──────
+query:  "How to reset 2FA?"
+found:  docs/security/2fa-reset.md (score: 0.94)
+        docs/security/account-recovery.md (0.87)
+
+── Крок 2: генерація з контекстом ─────
+system: You are a support agent. Answer using ONLY
+        the provided context. If unsure, say so.
+        Context: [2fa-reset.md content here]
+user:   "How to reset 2FA?"
+ai:     Go to Settings → Security → Reset 2FA...
+Навіщо: менше галюцинацій, актуальні дані, відповіді з джерелами
+Для MAS: агент-retriever шукає, агент-generator відповідає
+[Час: ~3 хв]
+
+Self-Consistency — це majority voting для LLM. Замість одного запуску робимо N запусків з temperature > 0 і беремо найпопулярнішу відповідь.
+
+Wang et al. (ICLR 2023): показали що це значно підвищує accuracy на reasoning задачах.
+
+Trade-off: N запусків = N × вартість, N × latency. Для production треба балансувати.
+
+Для MAS: можна запустити N паралельних агентів + один агент-агрегатор який збирає відповіді та голосує.
+
+💡 Аналогія: як в суді — 12 присяжних краще ніж один суддя для складних справ.
+
+→ Перехід: окей, ми покрили всі основні техніки. Як обрати правильну?
+
+AGENTIC RAG
+Агент сам вирішує коли і що шукати — RAG як tool call
+Приклад (support-агент з інструментами):
+system: You are a support agent.
+        Tools: search_docs(query), get_user(id)
+        Use tools when you need information.
+user:   "How do I reset 2FA for user #4521?"
+ai:     I need the docs and user info. Calling:
+        tool: search_docs("reset 2FA")
+        tool: get_user(4521)
+result: [2fa-reset.md] + [user: Pro plan, 2FA on]
+ai:     User #4521 has 2FA enabled. To reset:...
+Різниця з RAG: агент сам вирішує що шукати, може комбінувати кілька джерел
+[Час: ~3 хв]
+
+Self-Consistency — це majority voting для LLM. Замість одного запуску робимо N запусків з temperature > 0 і беремо найпопулярнішу відповідь.
+
+Wang et al. (ICLR 2023): показали що це значно підвищує accuracy на reasoning задачах.
+
+Trade-off: N запусків = N × вартість, N × latency. Для production треба балансувати.
+
+Для MAS: можна запустити N паралельних агентів + один агент-агрегатор який збирає відповіді та голосує.
+
+💡 Аналогія: як в суді — 12 присяжних краще ніж один суддя для складних справ.
+
+→ Перехід: окей, ми покрили всі основні техніки. Як обрати правильну?
+
+REASONING + ACTING
+[Час: ~2 хв]
+
+ReAct — це фундаментальний патерн для AI агентів. Це САМЕ ТЕ, що працювало на Лекції 3 у LangChain — під капотом завжди ReAct.
+
+Yao et al. (ICLR 2023): reasoning + actions в інтерливному форматі.
+
+Переваги над CoT: може дістати інформацію із зовнішнього світу (tools!)
+Переваги над Act-only: обґрунтовує кожну дію (Thought перед Action)
+
+Результати з paper: ALFWorld +34%, WebShop +10% з 1-2 few-shot.
+
+→ Перехід: давайте розберемо ReAct по компонентах.
+
+ReAct — ПРИКЛАД
+Reasoning + Acting: модель думає, потім діє, спостерігає результат
+Приклад (Thought → Action → Observation цикл):
+user:    Birthplace of the director of Jaws?
+Thought: I need to find who directed Jaws.
+Action:  Search["Jaws film director"]
+Observe: Jaws (1975) directed by Steven Spielberg.
+Thought: Now I need Spielberg's birthplace.
+Action:  Search["Steven Spielberg birthplace"]
+Observe: Born in Cincinnati, Ohio.
+Thought: I have the answer.
+Action:  Finish["Cincinnati, Ohio"]
+Yao et al., 2023: Thought = CoT reasoning, Action = tool call, Observe = tool result
+
+ReAct — ШАБЛОН ПРОМПТУ
+System prompt + приклад виконання (послідовність викликів)
+system: You are a research assistant. Answer questions using tools.
+        You have access to these tools:
+        - Search(query): web search
+        - Calc(expr): calculator
+        - Finish(answer): final answer
+        Solve by repeating this cycle:
+        Thought: [reason about what to do next]
+        Action:  [call one tool]
+        Observe: [tool returns result]
+        Rules: max 5 steps, use ONLY listed tools.
+user:   How old was the director of Jaws when the film premiered?
+────────────────── API call 1 → LLM генерує text + tool_call ─────────────────
+ai:     Thought: I need to find who directed Jaws.          ← content (text)
+        Action: Search("director of Jaws")                  ← tool_call
+        ───────────── оркестратор виконує tool, додає result в messages ────────────
+tool:   Steven Spielberg directed Jaws (1975).              ← tool_result
+────────────────── API call 2 → LLM бачить всю історію + tool_result ────────────
+ai:     Thought: Now I need Spielberg's birth date.
+        Action: Search("Steven Spielberg birth date")
+tool:   Born December 18, 1946.
+────────────────── API call 3 ──────────────────────────────────────
+ai:     Thought: Jaws premiered June 20, 1975. Calculate age.
+        Action: Calc(1975 - 1946)
+tool:   29
+────────────────── API call 4 → LLM вирішує завершити ───────────────────────
+ai:     Thought: He was 28, turning 29 later that year.
+        Action: Finish("Steven Spielberg was 28 years old.")
+1 ітерація = 1 API call → LLM генерує text + tool_call → оркестратор додає {role:"tool"} → новий API call
+
+TREE OF THOUGHTS (ToT)
+Покроково: 4 числа → 3 → 2 → 1. Кожен крок = generate → evaluate → expand/prune.
+Задача: Make 24 from [4, 9, 10, 13] using +−×÷
+─────── API call 1: generate — “згенеруй 3 перші кроки” ────────────────────
+system: Given [4,9,10,13], propose 3 possible first operations.
+ai:     A: 13−9=4 → [4,4,10]   B: 10−4=6 → [6,9,13]   C: 13+9=22 → [4,10,22]
+─────── API calls 2–4: evaluate — окремий виклик на кожну гілку ───────────
+call 2  "Can [4,4,10] make 24? Rate: sure/maybe/impossible"
+  ai:   impossible ✘ pruned
+call 3  "Can [6,9,13] make 24? Rate: sure/maybe/impossible"
+  ai:   maybe → expand
+call 4  "Can [4,10,22] make 24? Rate: sure/maybe/impossible"
+  ai:   impossible ✘ pruned
+─────── API call 5: expand B — “розвинь [6,9,13]” ──────────────────
+system: Given [6,9,13], propose 3 next operations toward 24.
+ai:     B1: 13−9=4 → 6×4=24 ✔   B2: 9−6=3 → [3,13]   B3: 6+9=15 → [15,13]
+Мін. 5 API calls на 1 задачу. Оцінки calls 2–4 можна паралелити.
+
+META PROMPTING
+Сильна LLM пише промпт → eval на тестах → LLM фіксить → повторюємо.
+─────── 1. DEFINE — формулюємо задачу та критерії ──────────────────────────
+task:      "Classify support tickets → billing | technical | feature_request | other"
+Target:    gpt-5-mini ($0.25/M)	optimizer: gpt-5.2 Thinking ($1.75/M)
+test_set:  50 розмічених тикетів з правильними категоріями
+─────── 2. GENERATE — gpt-5.2 пише першу версію промпта ────────────────────
+5.2: "Write a system prompt for classifying support tickets. Categories: billing, technical..."
+ai:  prompt_v1 = "You are a support ticket classifier. Respond with JSON: {category, ...}"
+─────── 3. EVAL — проганяємо prompt_v1 через gpt-5-mini на test_set ─────────
+run: gpt-5-mini(prompt_v1, ticket) for each of 50 tickets
+     accuracy = 78%  errors: feature_request↔technical (8), billing↔other (3)
+─────── 4. REFINE — gpt-5.2 аналізує помилки та фіксить промпт ──────────────
+5.2: "Here is the prompt, results, and 11 errors. Fix the prompt."
+ai:  prompt_v2 = "...feature_request = NEW functionality; technical = EXISTING broken..."
+─────── 5. LOOP — повторюємо 3→4 поки accuracy не стабілізується ──────────
+     v1 78% → v2 89% → v3 94% → v4 95% (converged)
+─────── 6. DEPLOY — prompt_v4 іде в продакшн на дешевій моделі ────────────
+     production: gpt-5-mini + prompt_v4  // 5.2 only needed at dev time
+
+gpt-5.2 Thinking = dev-time cost. В продакшні працює тільки gpt-5-mini з оптимізованим промптом.
+
+─────── Тренування: два різних підходи ──────────────────────────────────
+Standard LLM:  Pretrain → SFT → RLHF (align з preferences людей)
+Reasoner:      Pretrain → SFT (з CoT прикладами) → RL з verifiable rewards
+─────── Ключова різниця: reward signal ──────────────────────────────────
+RLHF:  "яка відповідь більше подобається людям?" → human preferences
+RLVR:  "чи правильна фінальна відповідь?" → math/code correctness (об'єктивно)
+─────── Що змінює RL для reasoning? ─────────────────────────────────────
+1. Модель сама вчиться генерувати CoT — не промптом, а нативно через тренування
+2. Backtracking — помітила помилку → повертається, пробує інший шлях
+3. Self-verification — o3 пише brute-force, потім перевіряє оптимальне рішення
+4. Test-time compute scaling — більше думає = краще відповідає (логарифмічно)
+─────── Аналогія: System 1 vs System 2 (Kahneman) ──────────────────────
+System 1 (GPT-4o, Claude Sonnet direct) — швидко, інтуїтивно, "хліб і..." → "масло"
+System 2 (o3, R1, GPT-5.2 Thinking) — повільно, аналітично, 17×24 = ... → думає
+REASONING В СУЧАСНИХ LLM
+Чим принципово відрізняються reasoning-моделі від звичайних LLM?
+DeepSeek-R1-Zero показав: reasoning виникає як emergent behavior з чистого RL без SFT даних.
+
+ЯКУ ТЕХНІКУ ОБРАТИ? 
+
+БАЗОВІ ТЕХНІКИ
+Проста задача, стандартний формат  →  Zero-Shot
+Потрібен специфічний формат/патерн  →  Few-Shot
+
+МІРКУВАННЯ
+Багатокрокове міркування  →  CoT  /  Few-Shot CoT
+Критична точність, є бюджет  →  Self-Consistency
+Складна задача з розгалуженнями  →  Tree of Thought
+Модель помиляється — потрібна перевірка  →  Self-Reflection
+
+ЗОВНІШНІ ЗНАННЯ + ДІЇ
+Потрібні актуальні/зовнішні дані  →  RAG  /  Agentic RAG
+Потрібні інструменти + міркування  →  ReAct
+[Час: ~2 хв]
+
+Це decision tree — починаєш з найпростішого і спускаєшся тільки коли результат недостатній.
+
+Правило: НІКОЛИ не починай з CoT або Self-Consistency. Спочатку спробуй Zero-Shot. Якщо не працює — Few-Shot. І так далі.
+
+Це економить і гроші, і час. Zero-Shot = 1 запит. Self-Consistency = N запитів.
+
+→ Перехід: ці техніки працюють "в голові" LLM. Але агент повинен ДІЯТИ — шукати, викликати API. Для цього потрібен ReAct.
+
+Розмитість — "Write something" замість конкретного промпту
+Over-engineering — починай з zero-shot, ускладнюй тільки коли не працює
+Ігнорування edge cases — пустий input, gibberish, prompt injection
+Один тест нічого не доводить — тестуй 5+ разів з різними inputs
+ТИПОВІ ПОМИЛКИ ПРОМПТІНГУ
+
+Проблема: один промпт — різні результати на різних моделях
+GPT-4.1 → 95% accuracy
+GPT-5 mini → 60% accuracy
+Claude Sonnet 4.6 → parser fails
+Рішення: версіонування + eval-driven підхід
+Промпт у prompts/agent.yaml
+Тести в evals/test_cases.json
+Workflow: змінив модель → прогнав eval → побачив де зламалось → виправив. Це необхідність для продакшена
+КРИХКІСТЬ ПРОМПТІВ
+
+Вузька спеціалізація: 5 простих агентів > 1 складний
+Жорсткі формати: JSON/XML schema + валідація
+Ітеративна розробка: Zero-shot → Few-shot → CoT → ReAct
+Промпти = код: git, changelog, rollback
+Eval-driven: без метрик гадаєте, а не покращуєте
+Observability: логуй кожен промпт і відповідь
+Human-in-the-Loop: для дій з наслідками — confirmation step
+ЗАГАЛЬНІ ПРАВИЛА ПРОМПТІНГУ ДЛЯ MAS
+
+Промпт = посадова інструкція для агента. Визначає роль, стиль міркувань, взаємодію та межі
+Ітеративний підхід: Zero-shot → Few-shot → CoT → ReAct — ускладнюй лише коли треба
+ReAct — ключовий патерн для агентів: Thought → Action → Observation у циклі
+Промпти = код: версіонування в git, eval-driven розробка, observability
+Жорсткі формати обов'язкові: JSON/XML schema + валідація між агентами
+5 простих агентів > 1 складний: вузька спеціалізація + Human-in-the-Loop
+ВИСНОВКИ
+
+

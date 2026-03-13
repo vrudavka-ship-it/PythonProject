@@ -1,0 +1,621 @@
+Інженерія
+LLM-агентів
+Заняття 3
+Multi-Agent Systems
+Лектор
+Владислав Шанін
+
+КЛЮЧОВА ІДЕЯ
+Агенти — це просто софт з LLM всередині. Більшість продакшн-агентів — детермінований код з LLM у ключових точках. 
+
+Не магія — а інженерія.
+
+ПЛАН ЗАНЯТТЯ
+Tool / Function Calling — як LLM викликає зовнішні інструменти
+Фреймворки: LangChain, LlamaIndex, OpenAI SDK
+Пам'ять, Context Engineering та керування контекстом
+Model Context Protocol та стандартизація інтеграцій
+12-Factor Agents — принципи надійної інженерії та best practices
+
+Tool Calling — механізм, через який LLM взаємодіє із зовнішнім світом: генерує структурований запит (JSON), а ваш код виконує відповідну дію і повертає результат.
+Що включає: custom-функції (API-виклики, БД-запити), вбудовані інструменти (code interpreter, file search, web browsing).
+Як працює: ви описуєте доступні tools у JSON Schema → LLM обирає потрібний tool і генерує аргументи → ваш код виконує → результат повертається в LLM.
+Еволюція: парсинг регулярками (2022) → function calling (OpenAI, 2023) → tool use як стандарт індустрії (2023-24) → structured outputs (серпень 2024).
+ЩО ТАКЕ TOOL CALLING?
+
+ЯК ПРАЦЮЄ TOOL CALLING
+User Query
+1
+Користувачнадсилає запит
+LLM + Tools
+2
+LLM аналізує запитз описами tools у контексті
+Tool Call JSON
+3
+{"name": "get_weather", "args": {"city": "Kyiv"}}
+Execution
+4
+Ваш код виконуєреальну функцію
+Result → LLM
+5
+Результат повертаєтьсяв контекст LLM
+Final Response
+6
+LLM формує фінальнувідповідь користувачу
+
+{
+  "name": "get_weather",
+  "description": "Get weather for a city",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "city": {
+        "type": "string",
+        "description": "City name, e.g. Kyiv"
+      }
+    },
+    "required": ["city"]
+  }
+}
+TOOL SCHEMA
+name
+Унікальний ідентифікатор інструменту
+description
+LLM вибирає tool саме за цим — пишіть чітко!
+parameters
+JSON Schema: тип і опис кожного аргументу
+
+TOOL CALLING БЕЗ ФРЕЙМВОРКУ
+import json
+from openai import OpenAI
+
+client = OpenAI()
+
+messages = [
+  {"role": "system", "content": "You are a weather assistant."},
+  {"role": "user", "content": "What is the weather in Kyiv?"},
+]
+
+response = client.responses.create(
+  model="gpt-5.4",
+  input=messages,
+  tools=[
+    {
+      "type": "function",
+      "name": "get_weather",
+      "description": "Get weather for a city",
+      "parameters": {...}
+    }
+  ]
+)
+tool_call = response.output[0]
+
+args = json.loads(tool_call.arguments)
+result = get_weather(**args)
+КРОК 1 — ВИКЛИК API
+Передаємо tools= до LLM. Модель сама вирішує, яку функцію викликати.
+КРОК 2 — ВІДПОВІДЬ МОДЕЛІ
+tool_calls містить назву функції та аргументи, що обрала модель.
+КРОК 3 — ВИКОНАННЯ
+ВИ розпаковуєте аргументи і викликаєте реальну Python-функцію.
+
+STRUCTURED OUTPUT — ТРИ ПІДХОДИ
+JSON MODE
+FUNCTION CALLING
+PYDANTIC
+response = client.responses
+  .create(
+    model="gpt-5.4",
+    text={
+      "format": {
+        "type": "json_object”
+      }
+    },
+    input=[
+      {
+        "role": "user",
+        "content": prompt
+      }
+    ]
+  )
+ 
+data = json.loads(
+  response.output_text
+)
+tools = [{
+  "type": "function",
+  "name": "get_weather",
+  "parameters": {
+    "properties": {
+      "city": {...}
+    }
+}]
+ 
+resp = client.responses
+  .create(
+    model="gpt-5.4",
+    tools=tools,
+    tool_choice="auto"
+  )
+from pydantic import BaseModel
+ 
+class Person(BaseModel):
+  name: str
+  age:  int
+  city: str
+ 
+resp = client.beta.chat
+  .completions.parse(
+    model="gpt-5.4",
+    messages=msgs,
+    response_format=Person,
+  )
+ 
+out = (
+  resp.choices[0].message.parsed
+)
+
+Модель-агностичний фреймворк. Швидкий старт, LCEL композиція, гнучка зміна моделей.
+LANGCHAIN
+Нативний для OpenAI моделей. Responses API з вбудованими tools. Хороший вибір, але лише для OpenAI.
+OPENAI SDK
+Спеціалізація на Document AI та RAG. Workflows 1.0 для оркестрації. Ідеальний для обробки документів.
+LLAMAINDEX
+Рольовий multi-agent підхід. Агенти з ролями та цілями. Швидке прототипування команд агентів.
+CREWAI
+
+LANGCHAIN – CHAT MODELS
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+
+# OpenAI — pass model name as argument
+llm_openai = ChatOpenAI(model="gpt-5.4")
+
+# Anthropic — same interface, different provider
+llm_claude = ChatAnthropic(model="claude-opus-4-6")
+
+# Invoke — identical for both
+messages = [HumanMessage(content="Hello!")]
+
+resp_oai = llm_openai.invoke(messages)
+resp_ant = llm_claude.invoke(messages)  # same call!
+Що таке Chat Model?
+Абстракція над API різних LLM. Усі моделі мають однаковий метод .invoke(messages).
+Ключові параметри
+model — назва моделі
+temperature — 0.0 точно, 1.0 творчо
+streaming — потоковий вивід
+Підтримувані моделі
+ChatOpenAI, ChatAnthropic
+ChatGoogleGenerativeAI
+ChatOllama (локальні)
+
+LANGCHAIN – TOOLS
+from langchain_core.tools import tool
+
+# @tool decorator — minimal tool definition
+@tool
+def get_weather(city: str) -> str:
+    """Return current weather for a city."""
+    return f"Weather in {city}: 22C, sunny"
+
+# Tool with multiple parameters
+@tool
+def search_db(query: str, limit: int = 5) -> list:
+    """Search database records by query.
+    Args: query: search string. limit: max results.""")
+    return db.search(query, limit)[:limit]
+
+# Bind tools to model
+llm_with_tools = llm.bind_tools([get_weather, search_db])
+Як LangChain бачить інструмент?
+@tool читає ім'я функції, docstring та type hints — і автоматично генерує JSON-схему для LLM.
+3 обов'язкові елементи
+ім'я — назва функції
+docstring — опис для LLM
+type hints — типи параметрів
+bind_tools()
+Прив'язує список інструментів до моделі. Модель може викликати їх при потребі.
+
+LANGCHAIN – CHAINS (LCEL)
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+# 1. Build components
+prompt = ChatPromptTemplate.from_messages([
+    ("system","You are a {role}. Be concise."),
+    ("human","{question}")
+])
+model = ChatOpenAI(model="gpt-5.4")
+parser = StrOutputParser()
+
+# 2. Compose via | — this is an LCEL chain
+chain = prompt | model | parser
+
+# 3. Invoke with input variables
+result = chain.invoke({
+    "role": "Python expert",
+    "question": "What is a decorator?"
+})
+# result is a plain string, not AIMessage!
+Що таке LCEL?
+LangChain Expression Language — декларативний спосіб будувати конвеєри через оператор |.
+Потік даних
+dict → prompt → AIMessage
+AIMessage → model → str
+Переваги LCEL
+Автоматичний streaming
+Підтримка async/await
+Трасування через LangSmith
+Паралельне виконання
+
+LANGCHAIN – OUTPUT PARSERS
+from pydantic import BaseModel
+from langchain.output_parsers import PydanticOutputParser
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import JsonOutputParser
+
+# StrOutputParser — returns a clean string
+chain_str = prompt | llm | StrOutputParser()
+
+# PydanticOutputParser — typed object
+class Person(BaseModel):
+    name: str
+    age: int
+    skills: list[str]
+
+parser = PydanticOutputParser(pydantic_object=Person)
+chain_pydantic = prompt | llm | parser
+result = chain_pydantic.invoke({"text": "Jane, 28, Python"})
+# result.name == "Jane", result.age == 28
+Навіщо парсери?
+LLM завжди повертає рядок. Парсери перетворюють його на те, що потрібно коду.
+Типи парсерів
+StrOutputParser → str
+JsonOutputParser → dict
+PydanticOutputParser → model
+Pydantic = валідація
+Якщо LLM видасть неправильний формат — отримаємо ValidationError, а не тихий баг.
+
+ТИПИ ПАМ’ЯТІ АГЕНТА
+WORKING MEMORY
+# context window
+ 
+Область:
+ поточна сесія
+Розмір:
+ 8K–200K токенів
+Lifetime:
+ до кінця запиту
+ 
+# що включає
+messages[]
+tool results
+system prompt
+ 
+# context engineering
+явне керування
+що потрапляє в LLM
+SHORT-TERM
+# conversation buffer
+ 
+Область:
+ сесія користувача
+Зберігає:
+ останні N повідомл.
+Вартість:
+ низька
+ 
+# патерни
+BufferMemory
+SummaryMemory
+BufferWindowMemory
+ 
+# приклад
+Redis
+ з TTL на сесію
+LONG-TERM
+# persistent store
+ 
+Область:
+ між сесіями
+Зберігає:
+ факти, переваги
+Доступ:
+ явний read/write
+ 
+# реалізація
+Postgres
+Redis (persistent)
+Key-value store
+ 
+# важливо
+агент свідомо вирішує що зберігати
+SEMANTIC / RAG
+# vector search
+ 
+Область:
+ знання, документи
+Пошук:
+ за змістом
+Патерн:
+ RAG
+ 
+# сховища
+Pinecone
+Chroma
+pgvector
+ 
+# виклик
+similarity_search
+(query, k=5)
+
+LANGCHAIN – MEMORY
+from langchain.agents import create_agent
+from langgraph.checkpoint.memory import MemorySaver
+
+# Memory is built into create_agent via checkpointer
+agent = create_agent(
+    model="gpt-5.4",
+    tools=[get_weather, search_db],
+    checkpointer=MemorySaver(),
+    system_prompt="You are a helpful assistant."
+)
+
+# thread_id scopes history — each user gets their own
+config = {"configurable": {"thread_id": "alice"}}
+
+resp1 = agent.invoke(
+    {"messages": [{"role": "user", content: "My name is Alice."}]},
+    config=config
+)
+
+# Agent remembers the conversation automatically
+resp2 = agent.invoke(
+    {"messages": [{"role": "user", content: "What is my name?"}]},
+    config=config
+)
+# -> "Your name is Alice."
+Buffer vs Summary
+Buffer — повна история, зростає безмежно
+Summary — стискає, коштує токени
+Також доступні
+BufferWindowMemory (останні N)
+Redis/Postgres для persistence
+Ключ history
+load_memory_variables повертає dict з ключем "history" — передаємо в prompt як змінну.
+
+LANGCHAIN – AGENTS & AGENTEXECUTOR
+from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
+
+# create_agent — replaces create_react_agent + AgentExecutor
+agent = create_agent(
+    model="gpt-5.4",
+    tools=[get_weather, search_db],
+    system_prompt="Use tools when needed."
+)
+
+# .invoke() returns the final message list
+result = agent.invoke(
+    {"messages": [{"role": "user", content: "Weather in Kyiv?"}]}
+)
+
+# Middleware: composable hooks into the agent loop
+agent_w_middleware = create_agent(
+    model="gpt-5.4",
+    tools=[get_weather],
+    middleware=[SummarizationMiddleware(model="gpt-5.4")],
+)
+
+# stream() for token-by-token output
+for chunk in agent.stream({"messages": [...]}):
+    print(chunk)
+ReAct цикл
+Thought LLM думає
+Action викликає інструмент
+Observation результат
+Final Answer зупинка
+Параметри безпеки
+max_iterations — ліміт кроків
+handle_parsing_errors → стійкість
+
+LANGCHAIN – RETRIEVERS & VECTORSTORES
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings
+from langchain.chains import RetrievalQA
+
+# Documents to index
+docs = [
+  "LangChain is an LLM agent framework",
+  "LCEL uses | operator for chains",
+  "Agents autonomously select tools”
+]
+
+embeddings = OpenAIEmbeddings()
+vectorstore = Chroma.from_texts(docs, embeddings)
+
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,  retriever=retriever
+)
+ans = qa_chain.invoke({"query": "What is LCEL?"})
+Як працює RAG?
+Запит → ембедінг
+Пошук Top-K схожих
+Контекст + запит → LLM
+Відповідь з джерелами
+VectorStore варіанти
+Chroma — локально, просто
+FAISS — швидко, від Meta
+Pinecone — хмарно, для прод
+
+ADVANCED TOOL USE
+TOOL SEARCH
+CODE CALLING
+TOOL EXAMPLES
+Динамічне виявлення tools
+Замість 50K+ токенів на описи
+Агент шукає потрібне on-demand
+Вирішує проблему масштабу
+Виконання у code sandbox
+Зменшення навантаження
+на контекстне вікно
+Ефективніша обробка даних
+Паралельні виклики tools
+
+Приклади використання
+як частина специфікації
+Коли JSON Schema замало
+Навчання через демонстрацію
+Зменшення помилок вибору
+
+
+
+TOOL SEARCH – THE SCALE PROBLEM
+СИТУАЦІЯ
+Агент має доступ до сотень інструментів.
+Статичний список: всі інструменти передаються
+до контексту LLM при кожному виклику.
+
+НАСЛІДОК
+1 опис інструменту ≈ 100 токенів.
+500 інструментів → 50 000 токенів лише для інструментів.
+Модель губиться серед варіантів,
+вартість зростає, якість падає.
+МАСШТАБ
+10 інструментів ≈ 3 тис. токенів
+100 інструментів ≈ 30 тис. токенів
+500+ інструментів → переповнення контексту
+РІШЕННЯ
+Векторне сховище індексує описи інструментів.
+Агент отримує Top-K за потреби.
+3–5 інструментів замість сотень.
+ПОРІГ
+20+ інструментів — динамічний пошук
+перевершує статичний список.
+
+TOOL SEARCH – HOW IT WORKS
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings
+
+# Index all tools in vectorstore
+tool_docs = ["search_web: searches the web", ...]
+vectorstore = Chroma.from_texts(tool_docs, OpenAIEmbeddings())
+
+# On-demand retrieval during agent run
+query = "Find weather in Kyiv"
+relevant = vectorstore.similarity_search(query, k=3)
+# ['search_web', 'get_weather', 'query_api'] <- 3 of 500
+
+# Agent gets only the relevant tools
+def agent_step(query):
+    tools = vectorstore.similarity_search(query, k=5)
+    return llm.call(query, tools=tools)
+ЯК ЦЕ ПРАЦЮЄ
+Запит → ембединг →
+косинусна схожість → Top-K у контексті.
+ПЕРЕВАГИ
+~1K токенів замість 50K+
+Точніший вибір інструментів
+Оновлення інструментів без перезапуску
+ВЕКТОРНІ СХОВИЩА
+Chroma — локально, для розробки
+FAISS — швидко, від Meta
+Pinecone — хмара, для продакшну
+
+CODE CALLING – SANDBOX
+import subprocess
+
+def run_in_sandbox(code: str) -> dict:
+    # Docker: isolated, no network, timeout=30s
+    res = subprocess.run(
+        ["docker", "run", "--rm", "--network=none"],
+        input=code, capture_output=True, timeout=30
+    )
+    return {"stdout": res.stdout, "stderr": res.stderr}
+
+# Example: agent received a task
+code = llm.generate_code("Find the sum from 1 to 100")
+out = run_in_sandbox(code)
+# out = {'stdout': '5050', 'stderr': ''}
+
+# Self-check: if stderr exists, LLM fixes it
+if out["stderr"]:
+    fixed = llm.invoke(
+      f"Fix this code:\n{code}\nError:\n{out[’stderr’]}"
+    )
+    out = run_in_sandbox(fixed)
+ПІСОЧНИЦЯ
+Контейнер Docker або gVisor.
+Без мережі, без запису на диск.
+ОБМЕЖЕННЯ
+Таймаут: 30–120 секунд
+Ліміти CPU, RAM, диску застосовані
+Кожен запуск — новий контейнер
+САМОПЕРЕВІРКА
+Генерація → виконання → перевірка stderr
+Якщо помилка — LLM виправляє і запускає знову.
+
+MODEL CONTEXT PROTOCOL (MCP)
+MCP HOST
+H
+AI-застосунок(Claude Desktop, IDE)
+MCP CLIENT
+C
+перекладає запити LLMу протокол
+MCP SERVER
+S
+надає tools, resources, prompts
+Відкритий стандарт — Anthropic, листопад 2024. Прийнятий OpenAI, Google DeepMind, Microsoft.
+Аналогія: USB-C для AI — один стандартний роз'єм замість сотень кастомних інтеграцій.
+Транспорт: JSON-RPC 2.0 через STDIO (локально) або HTTP (remote).
+Сервер надає: Tools (функції), Resources (файли/БД), Prompts (шаблони).
+MCP vs Tool Calling: Tool Calling — кастомний код. MCP — стандартний протокол, plug-and-play екосистема >16 000 серверів.
+
+12-FACTOR AGENTS [*]
+Natural Language → Tools
+01
+Запит → структурований JSON
+Own Your Prompts
+02
+Повний контроль над промптом
+Own Your Context Window
+03
+Явно керуйте контекстом LLM
+Tools = JSON + Code
+04
+AI-рішення ≠ логіка виконання
+Unified Execution State
+05
+Один стан на весь пайплайн
+Launch via Simple API
+06
+Агент = один HTTP-виклик
+Human-in-the-Loop
+07
+HITL — операція першого класу
+Own Your Control Flow
+08
+Явний loop/switch, не фреймворк
+Compact Errors
+09
+Помилка → в контекст → retry
+Small, Focused Agents
+10
+3–10 кроків. Більше = ненадійність
+Trigger from Anywhere
+11
+Email, Slack, webhook — однаковий
+Stateless Reducer Design
+12
+(state, event) → new_state
+
+ПІДСУМКИ
+Агент — це не магічна сутність. Це звичайний софт, де LLM приймає рішення, а детермінований код їх виконує.
+Все починається з tool calling: NL → JSON → ваш код → результат назад у LLM. Решта — надбудова.
+Фреймворк прискорює старт, але ви маєте володіти своїм промптом, контекстом і control flow.
+Контекст — найцінніший ресурс. Хто краще керує context window — той будує кращих агентів.
+
+
