@@ -1,6 +1,6 @@
 # Research Agent
 
-Невеликий навчальний проєкт на **Python + LangChain**, який запускає research-агента з інтерактивного терміналу.
+Навчальний проєкт на **Python + OpenAI API** — Research Agent з власною реалізацією ReAct-циклу.
 
 Агент:
 - приймає питання від користувача;
@@ -23,10 +23,12 @@
 
 ### Можливості агента
 - інтерактивний запуск через `python main.py`;
-- зв'язний діалог у межах однієї сесії;
+- зв'язний діалог у межах однієї сесії (пам'ять через ручний список `messages`);
 - multi-step tool calling;
-- базова обробка помилок;
+- обробка помилок у кожному tool;
+- ліміт ітерацій (захист від нескінченного циклу);
 - обрізання довгих результатів tools для економії контексту;
+- логування кожного tool call у консоль;
 - автоматичне збереження фінальної відповіді в Markdown-файл.
 
 ---
@@ -34,15 +36,15 @@
 ## Структура проєкту
 
 ```text
-research-agent/
+PythonProject/
 ├── main.py              # Entry point — interactive REPL loop
-├── agent.py             # Agent setup (LLM, tools, memory, create_agent)
-├── tools.py             # Tool definitions and implementations
-├── config.py            # System prompt, settings, constants
+├── agent.py             # Власний ReAct loop (прямий виклик OpenAI API)
+├── tools.py             # Tool definitions (JSON Schema) та реалізації
+├── config.py            # System prompts, settings, константи
 ├── requirements.txt
 ├── example_output/
-│   └── report.md        # Example generated report
-└── README.md            # Setup instructions, architecture overview
+│   └── report.md        # Приклад згенерованого звіту
+└── README.md
 ```
 
 ---
@@ -55,42 +57,44 @@ research-agent/
 Відповідає за:
 - запуск REPL-циклу;
 - читання запитів користувача;
+- ручне ведення списку `messages` (пам'ять сесії без `MemorySaver`);
 - виклик агента;
 - друк фінальної відповіді;
 - автоматичне збереження звіту у файл.
 
 ### `agent.py`
-Містить збірку агента:
-- створення LLM;
-- підключення tools;
-- підключення system prompt;
-- підключення `MemorySaver` для пам'яті діалогу в межах сесії.
+Містить власну реалізацію ReAct-циклу:
+- прямий виклик OpenAI API (без LangChain агентних абстракцій);
+- цикл: LLM call → перевірка `finish_reason` → виконання tool calls → повторити;
+- логування кожного кроку ітерації;
+- обробка помилок при виконанні tools;
+- зупинка при досягненні ліміту ітерацій.
 
 ### `tools.py`
-Містить реалізацію інструментів:
-- веб-пошук;
-- читання URL;
-- запис звіту у файл.
+Містить два блоки:
+- **реалізація tools** — веб-пошук, читання URL, запис звіту;
+- **`TOOLS_SCHEMA`** — JSON Schema опис tools для OpenAI API (без `@tool` декоратора LangChain);
+- **`TOOLS_MAP`** — словник `{назва → функція}` для виклику tool за іменем.
 
 Також тут є:
-- обрізання довгих текстів;
+- обрізання довгих текстів (context engineering);
 - timeout-захист для мережевих викликів;
-- базове логування tool calls для дебагу.
+- логування кожного tool call у консоль.
 
 ### `config.py`
 Містить:
-- налаштування застосунку через `.env`;
-- системний prompt;
+- налаштування застосунку через `.env` (pydantic-settings);
+- бібліотеку system prompts для різних технік (zero-shot, few-shot, CoT, ReAct та інші);
 - константи й ліміти.
+
+Активний промпт: `SYSTEM_PROMPTS["react"]`.
 
 ---
 
 ## Які технології використані
 
-- **Python**
-- **LangChain**
-- **LangGraph / MemorySaver**
-- **langchain-openai**
+- **Python 3.13**
+- **OpenAI API** (через офіційний `openai` SDK, без LangChain агентних абстракцій)
 - **ddgs** — для DuckDuckGo search
 - **trafilatura** — для витягування основного тексту зі сторінки
 - **pydantic-settings** — для конфігурації через `.env`
@@ -99,7 +103,7 @@ research-agent/
 
 ## Встановлення
 
-> Рекомендовано використовувати **Python 3.13**.  
+> Рекомендовано використовувати **Python 3.13**.
 > На Python 3.14 деякі залежності можуть мати проблеми зі збіркою нативних модулів.
 
 ### 1. Створити virtualenv
@@ -139,13 +143,13 @@ REQUEST_TIMEOUT_SECONDS=20
 ### Пояснення змінних
 - `OPENAI_API_KEY` — API-ключ моделі
 - `OPENAI_MODEL` — назва моделі
-- `TEMPERATURE` — “креативність” моделі
+- `TEMPERATURE` — "креативність" моделі
 - `SEARCH_RESULTS_LIMIT` — скільки результатів повертати в `web_search`
 - `SEARCH_SNIPPET_MAX_CHARS` — ліміт для сніпетів пошуку
 - `PAGE_TEXT_MAX_CHARS` — ліміт для тексту сторінки
 - `OUTPUT_DIR` — директорія для збереження звітів
-- `DEFAULT_REPORT_FILENAME` — стандартне ім’я звіту
-- `MAX_ITERATIONS` — ліміт кроків агента
+- `DEFAULT_REPORT_FILENAME` — стандартне ім'я звіту
+- `MAX_ITERATIONS` — ліміт кроків агента (захист від нескінченного циклу)
 - `REQUEST_TIMEOUT_SECONDS` — timeout для мережевих викликів
 
 ---
@@ -168,7 +172,7 @@ REQUEST_TIMEOUT_SECONDS=20
 python main.py
 ```
 
-Після запуску з’явиться REPL:
+Після запуску з'явиться REPL:
 
 ```text
 Research Agent started.
@@ -212,44 +216,49 @@ Commands: 'exit', 'quit', ':q'
 ```text
 User: Порівняй naive RAG, sentence-window retrieval і parent-child retrieval
 
-Agent:
-  -> web_search("naive RAG retrieval method")
-  -> web_search("sentence-window retrieval method")
-  -> web_search("parent-child retrieval method")
-  -> read_url("https://...")
-  -> read_url("https://...")
-  -> final Markdown report
+─── Iteration 1/12 (messages in context: 2) ───
+🔧 Tool call: web_search(query='naive RAG retrieval method')
+📎 Result: Found 5 results
+
+─── Iteration 2/12 (messages in context: 5) ───
+🔧 Tool call: read_url(url='https://...')
+📎 Result: [7704 chars] extracted from page
+
+─── Iteration 3/12 (messages in context: 8) ───
+🔧 Tool call: write_report(filename='report.md', content_len=3200)
+📎 Result: Report saved to example_output/report.md
+
+Agent: [short summary to the user]
 ```
 
 ---
 
-## Як перевірити, що agent loop справді працює
+## Як працює ReAct loop
 
-У проєкті додано логування tool calls.
+`agent.py` реалізує власний ReAct-цикл (Reason + Act):
 
-Для складного запиту в консолі мають з’являтися рядки на кшталт:
-
-```text
-[tool] web_search(query='naive RAG retrieval method')
-[tool] web_search -> 5 results
-[tool] read_url(url='https://...')
-[tool] read_url -> 7704 chars
+```
+loop:
+  1. Відправляємо messages у LLM
+  2. LLM повертає відповідь:
+     - finish_reason == "stop"       → фінальна відповідь, зупиняємось
+     - finish_reason == "tool_calls" → виконуємо tools, додаємо результати в messages, повторюємо
+  3. Якщо вичерпали MAX_ITERATIONS → повертаємо повідомлення про ліміт
 ```
 
-Це підтверджує, що агент:
-- не просто відповідає з пам’яті моделі;
-- а реально використовує інструменти.
+Це пряма реалізація без `create_react_agent` або інших LangChain/LangGraph агентних абстракцій.
 
 ---
 
-## Як працює пам’ять
+## Як працює пам'ять
 
-У проєкті використовується `MemorySaver`.
+У проєкті пам'ять реалізована вручну через список `messages`:
+- `main.py` створює список і веде його між запитами;
+- агент отримує список, додає нові повідомлення (assistant + tool results) і повертає оновлений список;
+- агент пам'ятає попередні повідомлення в межах **поточного запуску програми**;
+- після завершення процесу пам'ять сесії скидається.
 
-Це означає:
-- агент пам’ятає попередні повідомлення в межах **поточного запуску програми**;
-- якщо після одного питання поставити уточнення, він може використати попередній контекст;
-- після завершення процесу пам’ять сесії скидається.
+Це свідома заміна `MemorySaver` (LangGraph) — тепер ми повністю контролюємо список повідомлень.
 
 ---
 
@@ -263,7 +272,7 @@ Agent:
 Це важливо, тому що:
 - великі tool results уповільнюють роботу;
 - збільшують вартість запиту;
-- можуть “розмити” увагу моделі.
+- можуть "розмити" увагу моделі.
 
 ---
 
@@ -273,9 +282,8 @@ Agent:
 - невалідний URL;
 - timeout мережевого виклику;
 - помилки завантаження сторінки;
-- відсутність результатів пошуку.
-
-У разі помилки tool повертає зрозуміле повідомлення, а не валить увесь процес.
+- відсутність результатів пошуку;
+- невідомий tool name (агент отримує зрозуміле повідомлення про помилку і продовжує).
 
 ---
 
@@ -287,17 +295,7 @@ Agent:
 example_output/report.md
 ```
 
-Також реалізовано окремий tool `write_report(...)`, щоб агент міг зберігати результат самостійно, якщо це потрібно сценарію.
-
----
-
-## Чому використано `create_agent`
-
-У завданні дозволено використовувати:
-- `create_react_agent`
-- або `create_agent`
-
-У цьому проєкті використано `create_agent`, тому що він дає той самий базовий agent loop з tools і добре інтегрується з поточною структурою.
+Також реалізовано окремий tool `write_report(...)`, щоб агент міг зберігати результат самостійно, якщо це потрібно сценарію. Для research-запитів виклик `write_report` є обов'язковим (прописано в system prompt).
 
 ---
 
@@ -306,11 +304,9 @@ example_output/report.md
 Файл `requirements.txt` містить зафіксовані версії бібліотек для відтворюваного середовища.
 
 Основні залежності:
-- `langchain`
-- `langgraph`
-- `langchain-openai`
-- `ddgs`
-- `trafilatura`
+- `openai` — офіційний SDK для OpenAI API
+- `ddgs` — DuckDuckGo search
+- `trafilatura` — витягування тексту зі сторінок
 - `pydantic`
 - `pydantic-settings`
 
@@ -321,9 +317,8 @@ example_output/report.md
 Це навчальний проєкт, тому тут є кілька свідомих спрощень:
 - звіти зберігаються в один і той самий файл;
 - логування зроблене через прості `print(...)`;
-- немає складної системи кешування результатів;
-- немає окремого persistence layer для довготривалої пам’яті;
-- agent loop ще можна покращити, щоб уникати повторних пошукових запитів.
+- немає кешування результатів;
+- немає довготривалої пам'яті між сесіями.
 
 ---
 
@@ -334,32 +329,18 @@ example_output/report.md
 - додати structured logging замість `print`;
 - додати cache для `web_search` і `read_url`;
 - підтримати кілька LLM-провайдерів через `.env`;
-- додати окремі runtime-output і example-output директорії;
 - зберігати історію сесій у SQLite або іншому сховищі;
 - додати цитування джерел у фінальному звіті.
 
 ---
 
-## Приклад output
-
-У директорії `example_output/` збережений приклад Markdown-звіту:
-
-```text
-example_output/report.md
-```
-
-Це приклад того, який результат генерує агент для research-запитів.
-
----
-
 ## Висновок
 
-Цей проєкт демонструє базову реалізацію **research agent**:
-- з LangChain agent loop;
-- з tool calling;
-- з memory;
+Цей проєкт демонструє власну реалізацію **ReAct agent**:
+- з прямим викликом OpenAI API (без LangChain агентних абстракцій);
+- з tool calling через JSON Schema;
+- з ручним керуванням пам'яттю (список `messages`);
 - з context engineering;
 - з генерацією Markdown-звітів.
 
 Окремо він спроєктований так, щоб код був більш зрозумілим для розробника, який переходить із Java на Python.
-```
