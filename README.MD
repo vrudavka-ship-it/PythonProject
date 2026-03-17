@@ -1,11 +1,11 @@
 # Research Agent
 
-Навчальний проєкт на **Python + OpenAI API** — Research Agent з власною реалізацією ReAct-циклу.
+Навчальний проєкт на **Python + OpenAI API** — Research Agent з власною реалізацією ReAct-циклу та RAG-системою.
 
 Агент:
 - приймає питання від користувача;
-- сам вирішує, коли треба використати інструменти;
-- виконує пошук у вебі;
+- сам вирішує, коли і де шукати — в інтернеті або в локальній базі знань;
+- виконує пошук у вебі та по локальних PDF-документах;
 - читає повний текст релевантних сторінок;
 - формує структурований **Markdown-звіт**;
 - зберігає результат у файл.
@@ -17,6 +17,7 @@
 ## Можливості
 
 ### Реалізовані tools
+- `knowledge_search(query: str)` — гібридний пошук у локальній базі знань (PDF-документи)
 - `web_search(query: str)` — пошук у вебі через DuckDuckGo
 - `read_url(url: str)` — читання повного тексту сторінки
 - `write_report(filename: str, content: str)` — збереження Markdown-звіту
@@ -25,6 +26,7 @@
 - інтерактивний запуск через `python main.py`;
 - зв'язний діалог у межах однієї сесії (пам'ять через ручний список `messages`);
 - multi-step tool calling;
+- агент сам вирішує: шукати в локальних документах чи у вебі, або комбінувати обидва джерела;
 - обробка помилок у кожному tool;
 - ліміт ітерацій (захист від нескінченного циклу);
 - обрізання довгих результатів tools для економії контексту;
@@ -40,11 +42,14 @@ PythonProject/
 ├── main.py              # Entry point — interactive REPL loop
 ├── agent.py             # Власний ReAct loop (прямий виклик OpenAI API)
 ├── tools.py             # Tool definitions (JSON Schema) та реалізації
+├── retriever.py         # Hybrid Retrieval: BM25 + Vector + CrossEncoder Reranking
+├── ingest.py            # Ingestion pipeline: PDF → chunks → embeddings → FAISS
 ├── config.py            # System prompts, settings, константи
 ├── requirements.txt
-├── example_output/
-│   └── report.md        # Приклад згенерованого звіту
-└── README.md
+├── data/                # PDF-документи для локальної бази знань
+├── faiss_index/         # FAISS-індекс (генерується через python ingest.py, не в git)
+├── example_output/      # Згенеровані Markdown-звіти
+└── README.MD
 ```
 
 ---
@@ -59,8 +64,7 @@ PythonProject/
 - читання запитів користувача;
 - ручне ведення списку `messages` (пам'ять сесії без `MemorySaver`);
 - виклик агента;
-- друк фінальної відповіді;
-- автоматичне збереження звіту у файл.
+- друк фінальної відповіді.
 
 ### `agent.py`
 Містить власну реалізацію ReAct-циклу:
@@ -71,8 +75,8 @@ PythonProject/
 - зупинка при досягненні ліміту ітерацій.
 
 ### `tools.py`
-Містить два блоки:
-- **реалізація tools** — веб-пошук, читання URL, запис звіту;
+Містить чотири блоки:
+- **реалізація tools** — `knowledge_search`, `web_search`, `read_url`, `write_report`;
 - **`TOOLS_SCHEMA`** — JSON Schema опис tools для OpenAI API (без `@tool` декоратора LangChain);
 - **`TOOLS_MAP`** — словник `{назва → функція}` для виклику tool за іменем.
 
@@ -81,13 +85,35 @@ PythonProject/
 - timeout-захист для мережевих викликів;
 - логування кожного tool call у консоль.
 
+### `ingest.py`
+Pipeline для завантаження документів у векторну базу даних.
+
+Запускається окремо: `python ingest.py`
+
+Алгоритм:
+1. Сканує `./data/` і знаходить нові або змінені PDF-файли (incremental update).
+2. Завантажує і ріже документи на чанки (`RecursiveCharacterTextSplitter`, chunk_size=500).
+3. Генерує ембедінги через OpenAI API (`text-embedding-3-small`).
+4. Зберігає FAISS-індекс на диск (`faiss_index/`).
+5. Трекає вже проіндексовані файли в `faiss_index/ingested_files.json`.
+
+### `retriever.py`
+Гібридний пошук по локальній базі знань.
+
+Три шари пошуку:
+1. **Semantic (Vector)** — FAISS, пошук за cosine similarity. Розуміє синоніми і контекст.
+2. **Lexical (BM25)** — пошук за ключовими словами. Точні збіги термінів, абревіатур.
+3. **Reranking (CrossEncoder)** — модель `BAAI/bge-reranker-base` читає пару (запит + документ) разом і дає точніший score релевантності.
+
+Результат: top-3 найрелевантніших чанки з посиланням на джерело (файл + сторінка).
+
 ### `config.py`
 Містить:
 - налаштування застосунку через `.env` (pydantic-settings);
 - бібліотеку system prompts для різних технік (zero-shot, few-shot, CoT, ReAct та інші);
 - константи й ліміти.
 
-Активний промпт: `SYSTEM_PROMPTS["react"]`.
+Активний промпт: `SYSTEM_PROMPTS["react"]` — включає інструкції для вибору між `knowledge_search` і `web_search`.
 
 ---
 
@@ -98,6 +124,11 @@ PythonProject/
 - **ddgs** — для DuckDuckGo search
 - **trafilatura** — для витягування основного тексту зі сторінки
 - **pydantic-settings** — для конфігурації через `.env`
+- **faiss-cpu** — векторний індекс для semantic search
+- **rank_bm25** — лексичний пошук за ключовими словами
+- **sentence-transformers** — CrossEncoder reranker (`BAAI/bge-reranker-base`)
+- **pypdf** — парсинг PDF документів
+- **langchain-community, langchain-classic** — компоненти для RAG pipeline
 
 ---
 
@@ -146,7 +177,7 @@ REQUEST_TIMEOUT_SECONDS=20
 - `TEMPERATURE` — "креативність" моделі
 - `SEARCH_RESULTS_LIMIT` — скільки результатів повертати в `web_search`
 - `SEARCH_SNIPPET_MAX_CHARS` — ліміт для сніпетів пошуку
-- `PAGE_TEXT_MAX_CHARS` — ліміт для тексту сторінки
+- `PAGE_TEXT_MAX_CHARS` — ліміт для тексту сторінки і результатів `knowledge_search`
 - `OUTPUT_DIR` — директорія для збереження звітів
 - `DEFAULT_REPORT_FILENAME` — стандартне ім'я звіту
 - `MAX_ITERATIONS` — ліміт кроків агента (захист від нескінченного циклу)
@@ -168,6 +199,29 @@ REQUEST_TIMEOUT_SECONDS=20
 
 ## Запуск
 
+### Крок 1 — Побудова локальної бази знань
+
+Перед першим запуском потрібно проіндексувати PDF-документи:
+
+```bash
+# Додай PDF-файли в директорію data/
+python ingest.py
+```
+
+Що відбувається:
+```text
+🔍 Scanning data directory...
+📁 Found 3 PDF file(s): [...]
+✂️  Total new chunks: 464
+🔨 Building new FAISS index from 464 chunk(s)...
+💾 FAISS index saved to: faiss_index/
+✅ Ingestion complete!
+```
+
+При додаванні нових файлів у `data/` — просто запусти `python ingest.py` знову. Вже проіндексовані файли не перероблятимуться.
+
+### Крок 2 — Запуск агента
+
 ```bash
 python main.py
 ```
@@ -184,51 +238,47 @@ Commands: 'exit', 'quit', ':q'
 
 ## Приклади запитів
 
-### Просте питання
+### Питання з локальної бази знань
 
 ```text
-чи важко працювати на пайтоні джавісту
+Що таке RAG і які є підходи до retrieval?
 ```
 
 Очікувана поведінка:
-- агент відповідає напряму;
-- tools можуть не викликатися;
-- результат все одно зберігається у файл.
+- агент викликає `knowledge_search` — шукає в локальних PDF;
+- формує звіт на основі знайдених фрагментів.
 
-### Research-запит
+### Комбінований research-запит
 
 ```text
-Порівняй naive RAG, sentence-window retrieval і parent-child retrieval
+Порівняй підходи до RAG з локальної бази і знайди нові RAG-техніки 2025 року
 ```
 
 Очікувана поведінка:
-- кілька викликів `web_search`;
-- 1–2 або більше викликів `read_url`;
-- фінальна Markdown-відповідь;
-- збереження результату у `example_output/report.md`.
+- `knowledge_search` — локальна база;
+- `web_search` → `read_url` — актуальна інформація з веб;
+- `write_report` — Markdown-звіт з обох джерел.
 
 ---
 
 ## Приклад реальної поведінки агента
 
-Для research-запиту агент може працювати приблизно так:
-
 ```text
-User: Порівняй naive RAG, sentence-window retrieval і parent-child retrieval
+You: Що таке RAG і які є підходи до retrieval?
 
 ─── Iteration 1/12 (messages in context: 2) ───
-🔧 Tool call: web_search(query='naive RAG retrieval method')
-📎 Result: Found 5 results
+🔧 Tool call: knowledge_search(query='RAG retrieval approaches')
+   [RAG] Loading FAISS index...
+   [RAG] Building BM25 index...
+   [RAG] Loading CrossEncoder reranker (BAAI/bge-reranker-base)...
+   [RAG] Ready.
+📎 Result: [3 document(s) found]
 
-─── Iteration 2/12 (messages in context: 5) ───
-🔧 Tool call: read_url(url='https://...')
-📎 Result: [7704 chars] extracted from page
+─── Iteration 2/12 (messages in context: 4) ───
+🔧 Tool call: write_report(filename='rag_approaches.md', content_len=1277)
+📎 Result: Report saved to example_output/rag_approaches.md
 
-─── Iteration 3/12 (messages in context: 8) ───
-🔧 Tool call: write_report(filename='report.md', content_len=3200)
-📎 Result: Report saved to example_output/report.md
-
-Agent: [short summary to the user]
+Agent: RAG — це техніка, де LLM отримує релевантний контекст із зовнішніх джерел...
 ```
 
 ---
@@ -250,15 +300,32 @@ loop:
 
 ---
 
+## Як працює RAG pipeline
+
+```
+Offline (один раз або при оновленні даних):
+  PDF files → PyPDFLoader → RecursiveCharacterTextSplitter
+  → OpenAI Embeddings → FAISS index (збережено на диск)
+
+Online (при кожному запиті knowledge_search):
+  query → [BM25 search]     ↘
+                              EnsembleRetriever → top-10 кандидатів
+  query → [Vector search]   ↗
+                              → CrossEncoder Reranker → top-3 результати
+                              → відформатований текст → LLM контекст
+```
+
+---
+
 ## Як працює пам'ять
 
 У проєкті пам'ять реалізована вручну через список `messages`:
 - `main.py` створює список і веде його між запитами;
-- агент отримує список, додає нові повідомлення (assistant + tool results) і повертає оновлений список;
+- агент отримує список, додає нові повідомлення (assistant + tool results);
 - агент пам'ятає попередні повідомлення в межах **поточного запуску програми**;
 - після завершення процесу пам'ять сесії скидається.
 
-Це свідома заміна `MemorySaver` (LangGraph) — тепер ми повністю контролюємо список повідомлень.
+Це свідома заміна `MemorySaver` (LangGraph) — ручний контроль над списком повідомлень.
 
 ---
 
@@ -266,13 +333,8 @@ loop:
 
 Щоб не перевантажувати контекстне вікно моделі:
 - результати `web_search` обрізаються до розумного ліміту;
-- текст із `read_url` теж обрізається;
+- текст із `read_url` і `knowledge_search` теж обрізається (`PAGE_TEXT_MAX_CHARS`);
 - великі сторінки не передаються у LLM повністю.
-
-Це важливо, тому що:
-- великі tool results уповільнюють роботу;
-- збільшують вартість запиту;
-- можуть "розмити" увагу моделі.
 
 ---
 
@@ -283,19 +345,8 @@ loop:
 - timeout мережевого виклику;
 - помилки завантаження сторінки;
 - відсутність результатів пошуку;
-- невідомий tool name (агент отримує зрозуміле повідомлення про помилку і продовжує).
-
----
-
-## Збереження звіту
-
-Фінальна відповідь автоматично зберігається у Markdown-файл:
-
-```text
-example_output/report.md
-```
-
-Також реалізовано окремий tool `write_report(...)`, щоб агент міг зберігати результат самостійно, якщо це потрібно сценарію. Для research-запитів виклик `write_report` є обов'язковим (прописано в system prompt).
+- відсутність FAISS-індексу (підказує запустити `python ingest.py`);
+- невідомий tool name (агент отримує зрозуміле повідомлення і продовжує).
 
 ---
 
@@ -307,40 +358,33 @@ example_output/report.md
 - `openai` — офіційний SDK для OpenAI API
 - `ddgs` — DuckDuckGo search
 - `trafilatura` — витягування тексту зі сторінок
-- `pydantic`
-- `pydantic-settings`
+- `faiss-cpu` — векторний індекс
+- `rank_bm25` — BM25 лексичний пошук
+- `sentence-transformers` — CrossEncoder reranker
+- `pypdf` — парсинг PDF
+- `langchain-community`, `langchain-classic` — RAG компоненти
+- `pydantic`, `pydantic-settings`
 
 ---
 
 ## Обмеження поточної реалізації
 
 Це навчальний проєкт, тому тут є кілька свідомих спрощень:
-- звіти зберігаються в один і той самий файл;
 - логування зроблене через прості `print(...)`;
-- немає кешування результатів;
-- немає довготривалої пам'яті між сесіями.
-
----
-
-## Можливі покращення
-
-Ідеї для наступних версій:
-- генерувати унікальні імена файлів звітів;
-- додати structured logging замість `print`;
-- додати cache для `web_search` і `read_url`;
-- підтримати кілька LLM-провайдерів через `.env`;
-- зберігати історію сесій у SQLite або іншому сховищі;
-- додати цитування джерел у фінальному звіті.
+- немає кешування результатів web_search;
+- немає довготривалої пам'яті між сесіями;
+- CrossEncoder модель завантажується при першому виклику `knowledge_search` (~5-10 сек).
 
 ---
 
 ## Висновок
 
-Цей проєкт демонструє власну реалізацію **ReAct agent**:
-- з прямим викликом OpenAI API (без LangChain агентних абстракцій);
-- з tool calling через JSON Schema;
-- з ручним керуванням пам'яттю (список `messages`);
-- з context engineering;
-- з генерацією Markdown-звітів.
+Цей проєкт демонструє **Agentic RAG**:
+- власна реалізація ReAct loop з прямим викликом OpenAI API;
+- tool calling через JSON Schema;
+- hybrid search (BM25 + vector) + CrossEncoder reranking;
+- агент сам вирішує коли шукати локально, а коли — у вебі;
+- ручне керування пам'яттю (список `messages`);
+- context engineering.
 
 Окремо він спроєктований так, щоб код був більш зрозумілим для розробника, який переходить із Java на Python.

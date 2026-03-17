@@ -21,3 +21,6 @@ env/
 
 # Claude working notes (local only)
 CLAUDE.md
+
+# FAISS vector index (бінарний, генерується через python ingest.py)
+faiss_index/

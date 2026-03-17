@@ -7,6 +7,7 @@ from ddgs import DDGS
 import trafilatura
 
 from config import BASE_DIR, settings
+from retriever import hybrid_search
 
 
 # ==============================
@@ -170,6 +171,35 @@ def read_url(url: str) -> str:
         return f"Error: read_url failed for {url}: {type(exc).__name__}: {exc}"
 
 
+def knowledge_search(query: str) -> str:
+    """
+    Шукає у локальній базі знань (проіндексовані PDF документи).
+
+    Використовує гібридний пошук: Semantic Search + BM25 + CrossEncoder Reranking.
+    Агент викликає цей tool коли запитання стосується локальних документів,
+    а не актуальних подій в інтернеті.
+
+    Повертає str — відформатований список знайдених фрагментів з джерелами.
+    """
+    print(f"\n🔧 Tool call: knowledge_search(query={query!r})")
+
+    try:
+        result = hybrid_search(query)
+        # Обрізаємо якщо результат дуже довгий — щоб не переповнити контекст LLM
+        trimmed = _trim_text(result, settings.page_text_max_chars)
+        # Рахуємо кількість знайдених фрагментів (розділені "---")
+        count = trimmed.count("[Source ")
+        print(f"📎 Result: [{count} document(s) found]")
+        return trimmed
+    except FileNotFoundError as exc:
+        msg = str(exc)
+        print(f"📎 Result: knowledge_search error — {msg}")
+        return f"Error: {msg}"
+    except Exception as exc:
+        print(f"📎 Result: knowledge_search error: {type(exc).__name__}: {exc}")
+        return f"Error: knowledge_search failed: {type(exc).__name__}: {exc}"
+
+
 def write_report(filename: str, content: str) -> str:
     """
     Зберігає Markdown-звіт у файл.
@@ -268,6 +298,30 @@ TOOLS_SCHEMA: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "knowledge_search",
+            "description": (
+                "Search the local knowledge base of ingested PDF documents. "
+                "Use this for questions about topics covered in the local documents "
+                "(RAG, LangChain, Large Language Models). "
+                "Prefer this over web_search when the question is about a concept "
+                "that is likely covered in the knowledge base. "
+                "Returns relevant text excerpts with source references."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query in natural language or as keywords.",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_report",
             "description": (
                 "Save a Markdown report to disk. "
@@ -299,4 +353,5 @@ TOOLS_MAP: dict[str, Callable[..., Any]] = {
     "web_search": web_search,
     "read_url": read_url,
     "write_report": write_report,
+    "knowledge_search": knowledge_search,
 }
