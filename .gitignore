@@ -25,3 +25,5 @@ CLAUDE_MEMORY.md
 
 # FAISS vector index (бінарний, генерується через python ingest.py)
 faiss_index/
+lectures/client_secret.json
+lectures/token.json
