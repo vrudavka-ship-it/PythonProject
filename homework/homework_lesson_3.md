@@ -138,7 +138,7 @@ text = trafilatura.extract(downloaded)
   - `ddgs >= 7.0` — https://pypi.org/project/ddgs/
   - `trafilatura >= 2.0.0` — https://pypi.org/project/trafilatura/
 - **README.md**: як запустити, які залежності встановити, який API-ключ потрібен, короткий опис архітектури
-- **Приклад роботи**: збережіть у `example_output/` один згенерований звіт, щоб було видно результат
+- **Приклад роботи**: збережіть у `output/` один згенерований звіт, щоб було видно результат
 
 ---
 
@@ -151,7 +151,7 @@ research-agent/
 ├── tools.py             # Tool definitions and implementations
 ├── config.py            # System prompt, settings, constants
 ├── requirements.txt
-├── example_output/
+├── output/
 │   └── report.md        # Example generated report
 └── README.md            # Setup instructions, architecture overview
 ```

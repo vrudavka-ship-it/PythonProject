@@ -20,3 +20,4 @@ sentence-transformers
 duckduckgo-search
 pypdf
 matplotlib
+langchain-classic

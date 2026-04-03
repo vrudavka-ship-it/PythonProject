@@ -1,80 +1,62 @@
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
-from ddgs import DDGS
-import trafilatura
+from tavily import TavilyClient
 
 from config import BASE_DIR, settings
 from retriever import hybrid_search
 
 
 # ==============================
+# Tavily клієнт (lazy singleton)
+# ==============================
+# TavilyClient — офіційний Python SDK для Tavily Search API.
+# Tavily спеціально оптимізований для LLM-агентів:
+#   - повертає чистий текст без HTML-сміття
+#   - може повертати повний контент сторінки (include_raw_content=True)
+#   - стабільніший за DuckDuckGo (немає rate limits і CAPTCHA)
+# Аналогія з Java: це як singleton Spring @Bean для HTTP-клієнта.
+_tavily_client: TavilyClient | None = None
+
+
+def _get_tavily() -> TavilyClient:
+    """Повертає TavilyClient, створює при першому виклику."""
+    global _tavily_client
+    if _tavily_client is None:
+        # api_key береться з settings (pydantic-settings читає з .env)
+        _tavily_client = TavilyClient(api_key=settings.tavily_api_key)
+    return _tavily_client
+
+
+# ==============================
 # Допоміжні функції (private)
 # ==============================
 
+def _sanitize(text: str) -> str:
+    """
+    Прибирає surrogate символи та інші некоректні Unicode-послідовності.
+
+    Surrogate символи (\\udcXX) можуть прийти з веб-сторінок через Tavily.
+    Якщо вони потраплять у messages → OpenAI API падає з UnicodeEncodeError.
+    encode("utf-8", errors="ignore") — тихо видаляє некоректні байти.
+    У Java — аналог: CharsetEncoder з CodingErrorAction.IGNORE.
+    """
+    return text.encode("utf-8", errors="ignore").decode("utf-8")
+
+
 def _trim_text(text: str, max_chars: int) -> str:
     """
-    Обрізає текст до max_chars символів.
+    Очищає і обрізає текст до max_chars символів.
 
-    Навіщо?
-    Результати tools потрапляють у список messages, який іде в LLM.
-    Якщо передавати занадто багато тексту — модель повільніша і дорожча.
-    Це context engineering.
-
-    У Java — аналог: StringUtils.abbreviate(text, maxWidth)
+    Результати tools потрапляють у messages → LLM.
+    Занадто довгий або некоректний текст — повільніше і дорожче.
+    У Java — аналог: StringUtils.abbreviate(text, maxWidth).
     """
-    cleaned = text.strip()
+    cleaned = _sanitize(text).strip()
     if len(cleaned) <= max_chars:
         return cleaned
     return cleaned[:max_chars].rstrip() + "\n\n[truncated]"
-
-
-def _run_with_timeout(func, *args, timeout_seconds: int):
-    """
-    Запускає функцію в окремому потоці з обмеженням часу виконання.
-
-    У Java — аналог: Future.get(timeout, TimeUnit.SECONDS)
-    Тут використовується ThreadPoolExecutor — пул потоків.
-
-    *args — це varargs, як у Java: void method(Object... args)
-    """
-    # ThreadPoolExecutor — менеджер пула потоків
-    # max_workers=1 — нам потрібен лише один потік для однієї задачі
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        # submit — відправляємо задачу у потік, отримуємо Future-об'єкт
-        future = executor.submit(func, *args)
-        # result(timeout=...) — чекаємо результату не довше ніж timeout_seconds
-        return future.result(timeout=timeout_seconds)
-
-
-def _search_web(query: str) -> list[dict[str, Any]]:
-    """
-    Виконує пошук у DuckDuckGo і повертає список результатів.
-
-    list[dict[str, Any]] — це як List<Map<String, Object>> у Java.
-    """
-    return list(DDGS().text(query, max_results=settings.search_results_limit))
-
-
-def _download_and_extract(url: str) -> str | None:
-    """
-    Завантажує сторінку і витягує з неї основний текст.
-
-    str | None — Union type, як Optional<String> у Java.
-    Повертає текст або None, якщо не вдалося завантажити.
-    """
-    downloaded = trafilatura.fetch_url(url)
-
-    if not downloaded:
-        return None
-
-    return trafilatura.extract(
-        downloaded,
-        include_comments=False,
-        include_tables=True,
-    )
 
 
 # ==============================
@@ -83,7 +65,10 @@ def _download_and_extract(url: str) -> str | None:
 
 def web_search(query: str) -> list[dict[str, str]]:
     """
-    Шукає у вебі та повертає список результатів.
+    Шукає у вебі через Tavily і повертає список результатів.
+
+    Tavily — пошукове API оптимізоване для LLM-агентів:
+    повертає чистий текст, стабільний, без CAPTCHA.
 
     Повертає list[dict] — кожен елемент має ключі: title, url, snippet.
     У Java — як List<SearchResult> де SearchResult — POJO з трьома полями.
@@ -91,27 +76,24 @@ def web_search(query: str) -> list[dict[str, str]]:
     print(f"\n🔧 Tool call: web_search(query={query!r})")
 
     try:
-        raw_results = _run_with_timeout(
-            _search_web,
-            query,
-            timeout_seconds=settings.request_timeout_seconds,
+        # search() — основний метод Tavily API
+        # max_results — скільки результатів повернути
+        response = _get_tavily().search(
+            query=query,
+            max_results=settings.search_results_limit,
         )
 
+        # response["results"] — list[dict] з ключами: title, url, content, score
         # list comprehension — стислий спосіб побудувати список з перетворенням
         # у Java: results.stream().map(...).collect(Collectors.toList())
-        formatted_results: list[dict[str, str]] = []
-        for item in raw_results:
-            title = str(item.get("title", "")).strip()
-            url = str(item.get("href", "")).strip()
-            snippet = str(item.get("body", "")).strip()
-
-            formatted_results.append(
-                {
-                    "title": title or "Untitled result",
-                    "url": url,
-                    "snippet": _trim_text(snippet, settings.search_snippet_max_chars),
-                }
-            )
+        formatted_results: list[dict[str, str]] = [
+            {
+                "title": _sanitize(item.get("title", "Untitled result")),
+                "url": _sanitize(item.get("url", "")),
+                "snippet": _trim_text(item.get("content", ""), settings.search_snippet_max_chars),
+            }
+            for item in response.get("results", [])
+        ]
 
         print(f"📎 Result: Found {len(formatted_results)} results")
 
@@ -120,15 +102,6 @@ def web_search(query: str) -> list[dict[str, str]]:
 
         return formatted_results
 
-    except FutureTimeoutError:
-        print("📎 Result: web_search timeout")
-        return [
-            {
-                "title": "Search timeout",
-                "url": "",
-                "snippet": f"web_search timed out after {settings.request_timeout_seconds} seconds",
-            }
-        ]
     except Exception as exc:
         print(f"📎 Result: web_search error: {type(exc).__name__}: {exc}")
         return [
@@ -142,7 +115,10 @@ def web_search(query: str) -> list[dict[str, str]]:
 
 def read_url(url: str) -> str:
     """
-    Завантажує сторінку за URL і повертає її текст.
+    Завантажує сторінку за URL через Tavily Extract і повертає її текст.
+
+    Tavily Extract — більш надійний ніж trafilatura:
+    обробляє JS-сайти, повертає структурований контент.
     """
     print(f"\n🔧 Tool call: read_url(url={url!r})")
 
@@ -150,22 +126,22 @@ def read_url(url: str) -> str:
         return "Error: URL must start with http:// or https://"
 
     try:
-        extracted = _run_with_timeout(
-            _download_and_extract,
-            url,
-            timeout_seconds=settings.request_timeout_seconds,
-        )
+        # extract() — Tavily API для витягування контенту з конкретної сторінки
+        response = _get_tavily().extract(urls=[url])
 
-        if not extracted:
-            return f"Error: page was not downloaded or readable text could not be extracted from {url}"
+        # response["results"] — list результатів, перший містить raw_content
+        results = response.get("results", [])
+        if not results:
+            return f"Error: could not extract content from {url}"
 
-        trimmed = _trim_text(extracted, settings.page_text_max_chars)
+        raw_content = results[0].get("raw_content", "") or results[0].get("content", "")
+        if not raw_content:
+            return f"Error: page was empty or unreadable: {url}"
+
+        trimmed = _trim_text(raw_content, settings.page_text_max_chars)
         print(f"📎 Result: [{len(trimmed)} chars] extracted from page")
         return trimmed
 
-    except FutureTimeoutError:
-        print("📎 Result: read_url timeout")
-        return f"Error: read_url timed out after {settings.request_timeout_seconds} seconds for {url}"
     except Exception as exc:
         print(f"📎 Result: read_url error: {type(exc).__name__}: {exc}")
         return f"Error: read_url failed for {url}: {type(exc).__name__}: {exc}"
@@ -185,7 +161,7 @@ def knowledge_search(query: str) -> str:
 
     try:
         result = hybrid_search(query)
-        # Обрізаємо якщо результат дуже довгий — щоб не переповнити контекст LLM
+        # _trim_text включає _sanitize — прибирає surrogates і обрізає довгий текст
         trimmed = _trim_text(result, settings.page_text_max_chars)
         # Рахуємо кількість знайдених фрагментів (розділені "---")
         count = trimmed.count("[Source ")
