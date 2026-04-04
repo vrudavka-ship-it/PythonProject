@@ -66,7 +66,9 @@ def get_research_agent():
 
 if __name__ == "__main__":
     # Запуск для ручного тестування: .venv/bin/python3 agents/research.py
-    os.environ.setdefault("OPENAI_API_KEY", __import__("config").settings.openai_api_key)
+    _cfg = __import__("config").settings
+    os.environ.setdefault("OPENAI_API_KEY", _cfg.openai_api_key)
+    os.environ.setdefault("TAVILY_API_KEY", _cfg.tavily_api_key)
 
     request = " ".join(sys.argv[1:]) or "What is Python? Give a brief overview."
     print(f"Testing Research Agent with: {request!r}\n")

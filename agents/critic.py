@@ -116,7 +116,9 @@ def get_critic_agent():
 if __name__ == "__main__":
     # Запуск для ручного тестування: .venv/bin/python3 agents/critic.py
     # Можна передати текст знахідок як аргумент або використовується дефолтний приклад.
-    os.environ.setdefault("OPENAI_API_KEY", __import__("config").settings.openai_api_key)
+    _cfg = __import__("config").settings
+    os.environ.setdefault("OPENAI_API_KEY", _cfg.openai_api_key)
+    os.environ.setdefault("TAVILY_API_KEY", _cfg.tavily_api_key)
 
     findings = " ".join(sys.argv[1:]) or (
         "# Python Overview\n"

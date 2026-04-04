@@ -103,7 +103,9 @@ if __name__ == "__main__":
     # Запуск для ручного тестування: .venv/bin/python3 agents/planner.py
     # if __name__ == "__main__" — блок виконується лише при прямому запуску файлу,
     # НЕ при імпорті. Аналогія з Java: public static void main(String[] args).
-    os.environ.setdefault("OPENAI_API_KEY", __import__("config").settings.openai_api_key)
+    _cfg = __import__("config").settings
+    os.environ.setdefault("OPENAI_API_KEY", _cfg.openai_api_key)
+    os.environ.setdefault("TAVILY_API_KEY", _cfg.tavily_api_key)
 
     request = " ".join(sys.argv[1:]) or "What is RAG and how does it work?"
     print(f"Testing Planner Agent with: {request!r}\n")
