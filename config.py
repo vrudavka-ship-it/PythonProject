@@ -468,6 +468,23 @@ Rules:
 # Викликаємо при імпорті — дата фіксується на момент старту програми
 CRITIC_SYSTEM_PROMPT = _build_critic_prompt()
 
+# ==============================
+# Порти MCP/ACP серверів (homework-lesson-9)
+# ==============================
+# Кожен сервер — окремий HTTP endpoint.
+# SearchMCP: інструменти для пошуку (web_search, read_url, knowledge_search)
+# ReportMCP: інструмент збереження звіту (save_report)
+# ACP: агенти (planner, researcher, critic) як ACP endpoint-и
+MCP_SEARCH_PORT = 8901
+MCP_REPORT_PORT = 8902
+ACP_PORT = 8903
+
+# URL-адреси для підключення клієнтів до серверів
+# f-string — як String.format() у Java
+MCP_SEARCH_URL = f"http://127.0.0.1:{MCP_SEARCH_PORT}/mcp"
+MCP_REPORT_URL = f"http://127.0.0.1:{MCP_REPORT_PORT}/mcp"
+ACP_BASE_URL = f"http://127.0.0.1:{ACP_PORT}"
+
 SUPERVISOR_SYSTEM_PROMPT = """## Identity
 You are a Research Supervisor — a coordinator that orchestrates a team of specialized agents
 to produce high-quality, verified research reports.

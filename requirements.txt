@@ -21,3 +21,7 @@ duckduckgo-search
 pypdf
 matplotlib
 langchain-classic
+# homework-lesson-9: MCP + ACP
+fastmcp==3.2.0
+acp-sdk==1.0.3
+uvicorn==0.35.0
