@@ -25,3 +25,6 @@ langchain-classic
 fastmcp==3.2.0
 acp-sdk==1.0.3
 uvicorn==0.35.0
+# homework-lesson-10: тестування агентів
+deepeval==3.9.5
+ragas==0.4.3
