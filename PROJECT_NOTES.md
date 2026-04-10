@@ -1,4 +1,4 @@
-# CLAUDE_MEMORY.md
+# PROJECT_NOTES.md
 > Спільна пам'ять Vasyl + Claude. Записуємо думки, рішення, ідеї — щоб не втрачати контекст між сесіями.
 
 ---
@@ -58,6 +58,85 @@ gpt-4o-mini + `response_format=SomeModel` + `tools=[...]` разом → мод�
 - **Варіанти фіксу:**
   - (A) Показати поточні args і дати редагувати `filename`/`content` окремо, потім скласти правильний `edited_action`
   - (B) Прибрати `edit`, залишити тільки `approve`/`reject`
+
+---
+
+---
+
+## Брейншторм: Production-ready архітектура (2026-04-10)
+
+### Контекст
+Обговорили що не вистачає проекту для production. Відповідь підтверджена лекцією 11.
+
+### Що реалізувати (пріоритет)
+
+#### 1. Docker Compose (низька складність, висока цінність)
+Зараз: 4 термінали вручну. Мета: `docker compose up` — все запускається.
+```yaml
+services:
+  search_mcp:   # порт 8901
+  report_mcp:   # порт 8902
+  acp_server:   # порт 8903
+  api:          # FastAPI, порт 8000
+  postgres:     # стан агентів
+  litellm:      # LLM Gateway з fallback
+```
+
+#### 2. FastAPI HTTP контролер (середня складність)
+Зараз: тільки REPL — не можна викликати ззовні.
+```
+POST /research         {"query": "..."} → {"task_id": "abc"}
+GET  /research/{id}    → {"status": "running|done|hitl", "result": "..."}
+POST /research/{id}/hitl → {"decision": "approve|reject"}
+```
+Закриває **принцип 11 — Trigger from Anywhere**.
+
+#### 3. PostgresSaver замість InMemorySaver (мінімальні зміни)
+Одна зміна в `supervisor.py`:
+```python
+# зараз
+from langgraph.checkpoint.memory import MemorySaver
+# стає
+from langgraph.checkpoint.postgres import PostgresSaver
+checkpointer = PostgresSaver(conn_string=settings.database_url)
+```
+Дає: HITL виживає рестарт, персистентна історія розмов.
+
+#### 4. Структуроване логування (structlog)
+Замінює всі `print()`. JSON-формат → читається в Docker logs / Grafana Loki.
+```python
+log.info("tool.called", tool="web_search", agent="researcher", query=query)
+log.info("hitl.interrupt", action="save_report", filename=filename)
+log.error("tool.failed", tool="knowledge_search", error=str(e))
+```
+
+#### 5. LiteLLM Gateway (середня складність)
+Проксі між кодом і OpenAI/Anthropic. Дає: failover, cost tracking, model routing.
+- Якщо OpenAI ліг → автоматично Claude через Bedrock
+- Cheap model (Haiku) для класифікації, дорога (Sonnet) для генерації
+
+### Що реалізувати пізніше
+
+| Компонент | Цінність | Коли |
+|---|---|---|
+| Prompt Injection filter | Безпека | Після FastAPI (є готовий код в лекції 11) |
+| LangSmith / Langfuse трейсинг | Observability | Після Docker |
+| Rate limiting на API | Безпека бюджету | Після FastAPI |
+| Streaming через SSE | UX | Після FastAPI |
+| Admin UI (Streamlit) | DevEx | Пізніше |
+| CI/CD з deepeval | Якість | Пізніше |
+
+### Висновок з лекції 11
+
+Production Deployment Checklist (наш поточний стан):
+
+| Компонент | Потрібно | Є зараз |
+|---|---|---|
+| Checkpointer | PostgresSaver | MemorySaver — не виживає рестарт |
+| LLM Gateway | LiteLLM Proxy | Прямий виклик OpenAI — немає failover |
+| Безпека | Input filter + Least Privilege | Немає |
+| Monitoring | LangSmith / structlog | print() |
+| Deployment | Docker + API | 4 термінали вручну |
 
 ---
 
