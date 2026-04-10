@@ -19,9 +19,8 @@ env/
 # Environment variables
 .env
 
-# Claude working notes (local only)
-CLAUDE.md
-CLAUDE_MEMORY.md
+# deepeval cache
+.deepeval/
 
 # FAISS vector index (бінарний, генерується через python ingest.py)
 faiss_index/
