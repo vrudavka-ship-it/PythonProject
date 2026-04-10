@@ -75,6 +75,6 @@ if __name__ == "__main__":
 
     result = get_research_agent().invoke(
         {"messages": [{"role": "user", "content": request}]},
-        {"recursion_limit": 8},
+        {"recursion_limit": 15},
     )
     print(f"\nFindings:\n{result['messages'][-1].content}")
