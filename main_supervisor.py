@@ -34,6 +34,26 @@ os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
 os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
 os.environ.setdefault("LANGFUSE_BASE_URL", settings.langfuse_base_url)
 
+# Патчимо OpenAI JSON encoder щоб він ігнорував surrogate символи замість падіння.
+import json as _json
+import re as _re
+import openai._utils._json as _openai_json
+import openai._base_client as _openai_base_client
+
+def _safe_dumps(obj):
+    s = _json.dumps(
+        obj,
+        cls=_openai_json._CustomEncoder,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    s = _re.sub(r"[\ud800-\udfff]", "", s)
+    return s.encode("utf-8", errors="ignore")
+
+_openai_json.openapi_dumps = _safe_dumps
+_openai_base_client.openapi_dumps = _safe_dumps
+
 from supervisor import get_supervisor
 from langfuse_utils import langfuse_handler, langfuse_client, flush as langfuse_flush
 from langfuse import propagate_attributes
