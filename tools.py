@@ -42,7 +42,10 @@ def _sanitize(text: str) -> str:
     encode("utf-8", errors="ignore") — тихо видаляє некоректні байти.
     У Java — аналог: CharsetEncoder з CodingErrorAction.IGNORE.
     """
-    return text.encode("utf-8", errors="ignore").decode("utf-8")
+    # re.sub видаляє surrogate символи (U+D800–U+DFFF) напряму з рядка.
+    # Це надійніше ніж encode/decode бо ловить всі surrogate незалежно від codec.
+    import re
+    return re.sub(r"[\ud800-\udfff]", "", text)
 
 
 def _trim_text(text: str, max_chars: int) -> str:

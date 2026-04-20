@@ -29,6 +29,7 @@ from langchain_core.tools import tool
 from config import settings, PLANNER_SYSTEM_PROMPT
 from schemas import ResearchPlan
 from tools import web_search as _web_search, knowledge_search as _knowledge_search
+from langfuse_utils import get_prompt_text
 
 
 @tool
@@ -88,12 +89,14 @@ def get_planner_agent():
     global _planner_agent
     if _planner_agent is None:
         _model = init_chat_model(f"openai:{settings.openai_model}", temperature=settings.temperature)
+        # Завантажуємо промпт з Langfuse, fallback на локальний
+        system_prompt = get_prompt_text("planner_system") or PLANNER_SYSTEM_PROMPT
         # Без response_format — Planner повертає JSON у тексті.
         # parse_research_plan() розбирає JSON з відповіді.
         _planner_agent = create_agent(
             model=_model,
             tools=[web_search, knowledge_search],
-            system_prompt=PLANNER_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             name="planner",
         )
     return _planner_agent

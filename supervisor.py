@@ -34,6 +34,15 @@ from langgraph.checkpoint.memory import InMemorySaver
 from config import settings, SUPERVISOR_SYSTEM_PROMPT, ACP_BASE_URL, MCP_REPORT_URL
 
 
+def _sanitize(text: str) -> str:
+    """Видаляє surrogate символи які ламають OpenAI JSON encoder."""
+    import re
+    return re.sub(r"[\ud800-\udfff]", "", text)
+# langfuse_utils імпортуємо тут — щоб LANGFUSE_* вже були в os.environ
+# (вони встановлюються в main_supervisor.py до імпорту supervisor)
+from langfuse_utils import langfuse_handler, get_prompt_text
+
+
 # ==============================
 # Допоміжна функція: запуск async з sync контексту
 # ==============================
@@ -89,7 +98,8 @@ async def _call_acp_agent(agent_name: str, message: str) -> str:
         )
         # run.output — список відповідних Message від агента
         # Беремо останнє повідомлення, першу частину, текстовий контент
-        return run.output[-1].parts[0].content
+        raw = run.output[-1].parts[0].content
+        return _sanitize(raw)
 
 
 async def _call_report_mcp(filename: str, content: str) -> str:
@@ -136,7 +146,7 @@ def plan(request: str) -> str:
     """
     print("\n[Supervisor → ACP → Planner]")
     # asyncio.run() — sync обгортка над async ACP виклику
-    result = _run_async(_call_acp_agent("planner", request))
+    result = _sanitize(_run_async(_call_acp_agent("planner", request)))
     print(f"  📎 ResearchPlan received [{len(result)} chars]")
     return result
 
@@ -157,7 +167,7 @@ def research(request: str) -> str:
     Output: comprehensive Markdown findings report
     """
     print("\n[Supervisor → ACP → Researcher]")
-    result = _run_async(_call_acp_agent("researcher", request))
+    result = _sanitize(_run_async(_call_acp_agent("researcher", request)))
     print(f"  📎 Findings received [{len(result)} chars]")
     return result
 
@@ -186,6 +196,7 @@ def critique(findings: str) -> str:
     result = _run_async(_call_acp_agent("critic", findings))
     # Витягуємо verdict для логування (шукаємо у JSON)
     import json as _json
+    result = _sanitize(result)
     try:
         data = _json.loads(result)
         verdict = data.get("verdict", "?")
@@ -233,11 +244,14 @@ def get_supervisor():
     """Повертає supervisor, створює при першому виклику (lazy singleton)."""
     global _supervisor
     if _supervisor is None:
+        # Завантажуємо system prompt з Langfuse Prompt Management.
+        # get_prompt_text() повертає None якщо промпт не знайдено → fallback на локальний.
+        system_prompt = get_prompt_text("supervisor_system") or SUPERVISOR_SYSTEM_PROMPT
         _model = init_chat_model(f"openai:{settings.openai_model}", temperature=settings.temperature)
         _supervisor = create_agent(
             model=_model,
             tools=[plan, research, critique, save_report],
-            system_prompt=SUPERVISOR_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             middleware=[
                 # HumanInTheLoopMiddleware — перехоплює tool calls перед виконанням
                 # interrupt_on={"save_report": True} — save_report потребує схвалення

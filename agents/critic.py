@@ -24,6 +24,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 
 from config import settings, CRITIC_SYSTEM_PROMPT
+from langfuse_utils import get_prompt_text
 from schemas import CritiqueResult
 from tools import (
     web_search as _web_search,
@@ -101,13 +102,17 @@ def get_critic_agent():
     """Повертає critic_agent, створює при першому виклику (lazy singleton)."""
     global _critic_agent
     if _critic_agent is None:
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        # Critic промпт потребує template variable {{today}} — передаємо через compile()
+        system_prompt = get_prompt_text("critic_system", today=today) or CRITIC_SYSTEM_PROMPT
         _model = init_chat_model(f"openai:{settings.openai_model}", temperature=settings.temperature)
         # Без response_format — Critic повертає вільний текст із JSON-блоком.
         # parse_critique_result() розбирає JSON з відповіді.
         _critic_agent = create_agent(
             model=_model,
             tools=[web_search, read_url, knowledge_search],
-            system_prompt=CRITIC_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             name="critic",
         )
     return _critic_agent

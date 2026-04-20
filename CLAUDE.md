@@ -22,10 +22,20 @@ Research Agent — навчальний Python-проєкт. Vasyl вивчає 
 - **Урок 8** — виконано (гілка `homework-lesson-8`). Реалізована мультиагентна система: Supervisor + Planner + Research + Critic агенти, HITL на save_report. Мерж і тег ще не зроблено.
 - **Урок 9** — виконано (гілка `homework-lesson-9`, коміт `1bcf49e`). MCP + ACP архітектура поверх hw8. Мерж і тег ще не зроблено.
 - **Урок 10** — виконано (гілка `homework-lesson-10`). DeepEval тести: golden dataset (15 прикладів), component tests, tool correctness, e2e. Мерж і тег ще не зроблено.
+- **Урок 12** — виконано (гілка `homework-lesson-12`). Langfuse observability: tracing, session/user tracking, Prompt Management (4 промпти), LLM-as-a-Judge (2 evaluators). Мерж і тег ще не зроблено.
+
+## Langfuse observability (lesson-12)
+- `langfuse_utils.py` — Langfuse клієнт singleton, CallbackHandler, get_prompt_text()
+- Всі system prompts агентів завантажуються з Langfuse Prompt Management з fallback на локальні
+- Промпти у Langfuse: `supervisor_system`, `planner_system`, `researcher_system`, `critic_system`
+- Tracing: session_id + user_id через `propagate_attributes`, callbacks=[langfuse_handler]
+- LLM-as-a-Judge evaluators: `research_relevance` (numeric), `response_completeness` (boolean)
+- Surrogate fix: `re.sub(r"[\ud800-\udfff]", "", text)` у tools.py, acp_server.py, supervisor.py
 
 ## Файлова структура проєкту
 ```
 PythonProject/
+├── langfuse_utils.py    # Langfuse client singleton, CallbackHandler, get_prompt_text() (hw12)
 ├── main.py              # REPL loop (hw9: Supervisor + HITL через MCP+ACP)
 ├── main_supervisor.py   # REPL loop (hw8: Supervisor + HITL, збережено як backup)
 ├── agent.py             # Власний ReAct loop (прямий виклик OpenAI API)
@@ -128,6 +138,15 @@ tests/
 | test_tools.py | **3/3 (100%)** | 1.0, 1.0, 1.0 |
 | test_researcher.py | **3/3 (100%)** | 0.86, 0.25→знижено поріг до 0.5, 0.74 |
 | test_e2e.py | **4/7 (57%)** | happy_path 3/6, failure_cases 1/1 |
+
+### Результати після hw12 (2026-04-20)
+| Файл | Pass Rate | Примітки |
+|------|-----------|----------|
+| test_planner.py | **3/3 (100%)** | без змін |
+| test_critic.py | **2/2 (100%)** | без змін |
+| test_tools.py | **3/3 (100%)** | без змін |
+| test_researcher.py | **2/3 (67%)** | multiagent groundedness 0.31 (відомий) |
+| test_e2e.py | **3/11 (27%)** | failure_cases GraphRecursionError (recursion_limit=5 замалий) |
 
 ### Відомі слабкі місця (baseline)
 - `test_researcher.py::test_research_grounded_multiagent` — score 0.25 (поріг знижено до 0.5).
