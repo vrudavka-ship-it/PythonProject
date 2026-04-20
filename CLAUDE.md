@@ -18,10 +18,10 @@ Research Agent — навчальний Python-проєкт. Vasyl вивчає 
 ## Поточний стан
 - **Урок 3** — виконано, змержено в master, тег є
 - **Урок 4** — виконано, змержено в master (коміт `7e5cc14`), тег `homework-lesson-4` є
-- **Урок 5** — виконано, змержено в master
-- **Урок 8** — виконано (гілка `homework-lesson-8`). Реалізована мультиагентна система: Supervisor + Planner + Research + Critic агенти, HITL на save_report. Мерж і тег ще не зроблено.
-- **Урок 9** — виконано (гілка `homework-lesson-9`, коміт `1bcf49e`). MCP + ACP архітектура поверх hw8. Мерж і тег ще не зроблено.
-- **Урок 10** — виконано (гілка `homework-lesson-10`). DeepEval тести: golden dataset (15 прикладів), component tests, tool correctness, e2e. Мерж і тег ще не зроблено.
+- **Урок 5** — виконано, змержено в master, тег `homework-lesson-5` є (коміт `72fe3f0`)
+- **Урок 8** — виконано, змержено в master, тег є
+- **Урок 9** — виконано, змержено в master, тег є
+- **Урок 10** — виконано, змержено в master, тег `homework-lesson-10` є (коміт `2ba53ac`)
 - **Урок 12** — виконано (гілка `homework-lesson-12`). Langfuse observability: tracing, session/user tracking, Prompt Management (4 промпти), LLM-as-a-Judge (2 evaluators). Мерж і тег ще не зроблено.
 
 ## Langfuse observability (lesson-12)
@@ -223,6 +223,62 @@ Research Agent потребує recursion_limit=15 (не 8) — він роби�
 .venv/bin/python3 main_supervisor.py
 ```
 
+## Наступний крок — Web UI + Docker + Postgres
+
+### Мета
+Замінити термінальний REPL на повноцінний веб-інтерфейс з персистентною пам'яттю.
+
+### Три компоненти
+1. **Docker Compose** — `docker-compose.yml`, сервіси: `app` (FastAPI) + `postgres` + MCP/ACP контейнери. `.env` пробрасується в контейнер.
+2. **Postgres замість InMemorySaver** — `langgraph-checkpoint-postgres`, drop-in заміна. Таблиця metadata: session_id, запит, timestamp — для history sidebar.
+3. **FastAPI контролер** — SSE `/stream`, `POST /approve`, `POST /reject`, `GET /sessions`. Статика — HTML/CSS/JS.
+
+### Лейаут UI (3 колонки)
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Research Agent                              [New Chat] [⚙]  │
+├────────────────┬─────────────────────────────────────────────┤
+│  History       │  CHAT / LOG          │  REPORT PREVIEW      │
+│  • RAG query   │  🔵 Planner          │  # RAG Overview      │
+│  • Multi-agent │    Building plan...  │  ## Introduction...  │
+│                │  🟡 Researcher       │                      │
+│                │    web_search(...) ▶ │  ## How it works     │
+│                │  🟢 Critic: APPROVE  │  ...                 │
+│                │  ┌──────────────┐   │  ──────────────────  │
+│                │  │ Save report? │   │  [Download .md]      │
+│                │  │[✓] [✗]      │   │                      │
+│                │  └──────────────┘   │                      │
+│                ├─────────────────────┴──────────────────────┤
+│                │  [Введи запит.............................] ▶│
+└────────────────┴────────────────────────────────────────────┘
+```
+
+### Деталі зон
+- **History** — список сесій з Postgres, клік завантажує стару сесію
+- **Chat/Log** — SSE стрімінг, кожен агент свій колір, tool calls як collapsed блоки, HITL sticky картка блокує інпут
+- **Report Preview** — Markdown рендериться в реальному часі (marked.js), після REJECT сіріє, кнопка Download
+- **Інпут** — disabled поки агент працює або є активний HITL
+
+### Технічний стек
+| Шар | Технологія |
+|-----|-----------|
+| Бекенд | FastAPI (нативний SSE, async) |
+| Стрімінг | Server-Sent Events |
+| Фронтенд | Vanilla JS + CSS Grid |
+| Markdown | marked.js |
+| Пам'ять | Postgres + langgraph-checkpoint-postgres |
+| Інфра | Docker Compose |
+
+### Порядок реалізації
+1. `docker-compose.yml` — postgres + app
+2. Замінити `InMemorySaver` → `AsyncPostgresSaver`
+3. FastAPI: `/stream` + `/approve` + `/reject` + `/sessions`
+4. HTML/CSS лейаут — три колонки
+5. JS — SSE + рендеринг повідомлень по агентах
+6. Markdown preview — реалтайм права панель
+7. History sidebar
+8. Polish — collapsed tool calls, HITL картка, disabled стани
+
 ## Важливі деталі імпортів (lesson-5)
 - EnsembleRetriever, ContextualCompressionRetriever, CrossEncoderReranker — з `langchain_classic`
   (НЕ з `langchain` або `langchain_community` — там їх немає в цій версії)
@@ -235,3 +291,16 @@ Research Agent потребує recursion_limit=15 (не 8) — він роби�
 - os.environ.setdefault("OPENAI_API_KEY", ...) і TAVILY_API_KEY — на початку main_supervisor.py
   до будь-яких LangChain імпортів (pydantic-settings не встановлює os.environ автоматично)
 - Tavily замінив DuckDuckGo: web_search і read_url тепер через TavilyClient
+
+## Важливі деталі (lesson-9: MCP + ACP)
+- **Async/sync mix у Supervisor**: `create_agent` — sync контекст, ACP і MCP клієнти — async.
+  Рішення: `asyncio.run(coro)` всередині кожного `@tool`. Безпечно бо `supervisor.stream()` — sync, event loop не активний.
+- **Баг acp-sdk 1.0.3**: надсилає bytes без `Content-Type: application/json` → 422 від ACP сервера.
+  Фікс: `ACPClient(headers={"Content-Type": "application/json"})` — вже виправлено в коді.
+- SearchMCP (8901) — один для всіх трьох ACP агентів (planner, researcher, critic)
+
+## Відомі баги (не виправлені)
+- **HITL `edit` flow** — `KeyError: 'name'` у `HumanInTheLoopMiddleware._process_decision`.
+  Файл: `main.py::_build_resume_command`.
+  Причина: передаємо `{"edited_action": {"feedback": feedback}}`, а middleware очікує `{"edited_action": {"name": <tool_name>, "args": {...}}}`.
+  Варіанти фіксу: (A) показати поточні args і дати редагувати filename/content окремо; (B) прибрати `edit`, залишити тільки approve/reject.

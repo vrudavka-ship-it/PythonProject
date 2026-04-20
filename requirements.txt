@@ -28,3 +28,5 @@ uvicorn==0.35.0
 # homework-lesson-10: тестування агентів
 deepeval==3.9.5
 ragas==0.4.3
+# homework-lesson-12: observability
+langfuse==4.3.1

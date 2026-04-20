@@ -55,6 +55,8 @@ PythonProject/
 ├── config.py                # Settings + system prompts + порти MCP/ACP
 ├── retriever.py             # Hybrid RAG: BM25 + FAISS + CrossEncoder Reranking
 ├── ingest.py                # PDF → chunks → embeddings → FAISS
+├── langfuse_utils.py        # Langfuse client singleton, CallbackHandler, get_prompt_text() (hw12)
+├── supervisor_local.py      # Supervisor без ACP/MCP — hw8 архітектура, використовується в hw12
 ├── agent.py                 # Власний ReAct loop (hw5, legacy)
 ├── requirements.txt
 ├── data/                    # PDF-документи для RAG (не в git)
@@ -77,6 +79,9 @@ PythonProject/
 - **sentence-transformers** — CrossEncoder reranker (`BAAI/bge-reranker-base`)
 - **pypdf** — парсинг PDF
 - **pydantic-settings** — конфігурація через `.env`
+- **langfuse** — observability: tracing, Prompt Management, LLM-as-a-Judge (hw12)
+- **deepeval** — LLM-as-a-Judge тести у стилі pytest (hw10)
+- **ragas** — оцінка RAG-систем (встановлено, не використовується активно)
 
 ---
 
@@ -298,10 +303,36 @@ Online (при кожному knowledge_search):
 
 ---
 
+## Тестування (hw10 — DeepEval)
+
+```bash
+.venv/bin/deepeval test run tests/test_planner.py -v
+.venv/bin/deepeval test run tests/test_researcher.py -v
+.venv/bin/deepeval test run tests/test_critic.py -v
+.venv/bin/deepeval test run tests/test_tools.py -v
+.venv/bin/deepeval test run tests/test_e2e.py -v
+.venv/bin/deepeval test run tests/ -v   # всі тести, ~15 хв
+```
+
+## Observability (hw12 — Langfuse)
+
+Трейсинг, Prompt Management і LLM-as-a-Judge через Langfuse.
+
+- System prompts агентів завантажуються з Langfuse Prompt Management з fallback на локальні (`config.py`)
+- Кожен запит трейситься: session_id + user_id, кроки агентів, tool calls
+- LLM-as-a-Judge evaluators: `research_relevance` (numeric), `response_completeness` (boolean)
+
+Потрібні додаткові змінні в `.env`:
+```dotenv
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com
+```
+
 ## Обмеження
 
 Це навчальний проєкт:
-- логування через `print()`
+- логування через `print()` (Langfuse трейсинг додано в hw12)
 - немає кешування результатів пошуку між запитами
 - CrossEncoder модель завантажується при першому виклику (~30 сек)
 - пам'ять між сесіями не зберігається (`InMemorySaver` — тільки в межах процесу)
