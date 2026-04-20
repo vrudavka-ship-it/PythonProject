@@ -20,6 +20,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 
 from config import settings, RESEARCH_SYSTEM_PROMPT
+from langfuse_utils import get_prompt_text
 from tools import (
     web_search as _web_search,
     read_url as _read_url,
@@ -54,11 +55,12 @@ def get_research_agent():
     """Повертає research_agent, створює при першому виклику (lazy singleton)."""
     global _research_agent
     if _research_agent is None:
+        system_prompt = get_prompt_text("researcher_system") or RESEARCH_SYSTEM_PROMPT
         _model = init_chat_model(f"openai:{settings.openai_model}", temperature=settings.temperature)
         _research_agent = create_agent(
             model=_model,
             tools=[web_search, read_url, knowledge_search],
-            system_prompt=RESEARCH_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             name="researcher",
         )
     return _research_agent

@@ -36,6 +36,12 @@ from config import PLANNER_SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT, CRITIC_SYSTEM_
 os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
 os.environ.setdefault("TAVILY_API_KEY", settings.tavily_api_key)
 
+
+def _sanitize(text: str) -> str:
+    """Видаляє surrogate символи що ламають OpenAI JSON encoder."""
+    import re
+    return re.sub(r"[\ud800-\udfff]", "", text)
+
 from acp_sdk.models import Message, MessagePart
 from acp_sdk.server import Server
 from fastmcp import Client as MCPClient
@@ -177,10 +183,18 @@ async def researcher_handler(input: list[Message]) -> Message:
             {"recursion_limit": 8},
         )
 
-        findings = result["messages"][-1].content
+        findings = _sanitize(result["messages"][-1].content)
         print(f"[ACP Researcher] → findings: [{len(findings)} chars]")
 
         return Message(role="agent", parts=[MessagePart(content=findings)])
+    except UnicodeEncodeError as exc:
+        # Surrogate символи з веб-сторінок потрапили у messages і ламають OpenAI API.
+        # Повертаємо часткову відповідь — краще ніж падіння.
+        print(f"[ACP Researcher] ⚠️  UnicodeEncodeError: {exc} — returning partial result")
+        return Message(role="agent", parts=[MessagePart(content=(
+            "Research encountered encoding issues with some web pages. "
+            "Please try a different query or use knowledge_search instead."
+        ))])
 
     finally:
         await mcp_client.__aexit__(None, None, None)

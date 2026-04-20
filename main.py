@@ -31,8 +31,13 @@ from langgraph.types import Command
 from config import settings
 os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
 os.environ.setdefault("TAVILY_API_KEY", settings.tavily_api_key)
+os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
+os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
+os.environ.setdefault("LANGFUSE_BASE_URL", settings.langfuse_base_url)
 
 from supervisor import get_supervisor
+from langfuse_utils import langfuse_handler, flush as langfuse_flush
+from langfuse import propagate_attributes
 
 
 # ==============================
@@ -86,7 +91,9 @@ def _get_user_decision() -> tuple[str, str]:
     Повертає tuple (decision, feedback).
     """
     while True:
-        decision = input("👉 approve / edit / reject: ").strip().lower()
+        raw = input("👉 approve / edit / reject: ")
+        # Видаляємо surrogate і non-ASCII сміття що потрапляє в stdin з stdout
+        decision = raw.encode("utf-8", errors="ignore").decode("utf-8").strip().lower()
 
         if decision == "approve":
             return "approve", ""
@@ -118,52 +125,62 @@ def _build_resume_command(decision: str, feedback: str) -> dict:
 # Стрімінг відповідей від Supervisor
 # ==============================
 
-def _stream_supervisor(query: str, thread_id: str) -> bool:
+def _stream_supervisor(query: str, thread_id: str, session_id: str) -> bool:
     """
     Стрімить відповіді Supervisor і обробляє HITL interrupts.
 
     Повертає True якщо виконання завершилось нормально,
     False якщо було відхилено (reject).
     """
-    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 40}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": 40,
+        "callbacks": [langfuse_handler],
+    }
 
-    for step in get_supervisor().stream(
-        {"messages": [{"role": "user", "content": query}]},
-        config,
-        stream_mode="updates",
+    with propagate_attributes(
+        session_id=session_id,
+        user_id="vasyl",
+        tags=["supervisor", "multi-agent", "hw12"],
+        metadata={"thread_id": thread_id},
     ):
-        if "__interrupt__" in step:
-            interrupts = step["__interrupt__"]
-            interrupt_value = interrupts[0].value
+        for step in get_supervisor().stream(
+            {"messages": [{"role": "user", "content": query}]},
+            config,
+            stream_mode="updates",
+        ):
+            if "__interrupt__" in step:
+                interrupts = step["__interrupt__"]
+                interrupt_value = interrupts[0].value
 
-            _show_interrupt(interrupt_value)
-            decision, feedback = _get_user_decision()
+                _show_interrupt(interrupt_value)
+                decision, feedback = _get_user_decision()
 
-            if decision == "reject":
-                print("\n❌ Report rejected. Cancelling save.")
-                resume_data = _build_resume_command("reject", "")
-                _resume_supervisor(resume_data, config)
-                return False
+                if decision == "reject":
+                    print("\n❌ Report rejected. Cancelling save.")
+                    resume_data = _build_resume_command("reject", "")
+                    _resume_supervisor(resume_data, config)
+                    return False
 
-            elif decision == "approve":
-                print("\n✅ Approved! Saving report...")
-                resume_data = _build_resume_command("approve", "")
-                _resume_supervisor(resume_data, config)
-                return True
+                elif decision == "approve":
+                    print("\n✅ Approved! Saving report...")
+                    resume_data = _build_resume_command("approve", "")
+                    _resume_supervisor(resume_data, config)
+                    return True
 
-            else:  # edit
-                print(f"\n✏️  Sending feedback to Supervisor: {feedback!r}")
-                resume_data = _build_resume_command("edit", feedback)
-                return _resume_with_hitl(resume_data, config)
+                else:  # edit
+                    print(f"\n✏️  Sending feedback to Supervisor: {feedback!r}")
+                    resume_data = _build_resume_command("edit", feedback)
+                    return _resume_with_hitl(resume_data, config)
 
-        else:
-            for node_name, node_output in step.items():
-                if isinstance(node_output, dict):
-                    for message in node_output.get("messages", []):
-                        if hasattr(message, "pretty_print"):
-                            message.pretty_print()
+            else:
+                for node_name, node_output in step.items():
+                    if isinstance(node_output, dict):
+                        for message in node_output.get("messages", []):
+                            if hasattr(message, "pretty_print"):
+                                message.pretty_print()
 
-    return True
+        return True
 
 
 def _resume_supervisor(resume_data: dict, config: dict) -> None:
@@ -173,7 +190,11 @@ def _resume_supervisor(resume_data: dict, config: dict) -> None:
         config,
         stream_mode="updates",
     ):
-        if "__interrupt__" not in step:
+        if "__interrupt__" in step:
+            # Middleware знову генерує interrupt після approve — автоматично підтверджуємо
+            _resume_supervisor(_build_resume_command("approve", ""), config)
+            return
+        else:
             for node_name, node_output in step.items():
                 if isinstance(node_output, dict):
                     for message in node_output.get("messages", []):
@@ -227,12 +248,15 @@ def main() -> None:
       - mcp_servers/report_mcp.py (порт 8902)
       - acp_server.py             (порт 8903)
     """
-    print("Multiagent Research System (homework-lesson-9: MCP + ACP)")
+    session_id = f"mas-session-{uuid.uuid4().hex[:8]}"
+
+    print("Multiagent Research System (homework-lesson-12: MCP + ACP + Langfuse)")
     print("Architecture: Supervisor → ACP → [Planner|Researcher|Critic] → MCP → Tools")
     print("Servers required:")
     print("  8901: SearchMCP  (web_search, read_url, knowledge_search)")
     print("  8902: ReportMCP  (save_report)")
     print("  8903: ACP Server (planner, researcher, critic)")
+    print(f"Langfuse session: {session_id}")
     print("Commands: exit, quit, :q")
     print()
 
@@ -241,20 +265,25 @@ def main() -> None:
 
         if user_input.lower() in {"exit", "quit", ":q"}:
             print("Bye!")
+            langfuse_flush()
             break
 
         if not user_input:
             print("Please enter a non-empty question.")
             continue
 
-        # Новий thread_id для кожного запиту — незалежні stateful sessions
         thread_id = str(uuid.uuid4())
 
         try:
-            _stream_supervisor(user_input, thread_id)
+            _stream_supervisor(user_input, thread_id, session_id)
+            langfuse_flush()
 
+        except UnicodeEncodeError:
+            print("\n⚠️  Web page contained invalid characters. Please try another query.")
+            langfuse_flush()
         except KeyboardInterrupt:
             print("\nInterrupted by user.")
+            langfuse_flush()
             break
         except Exception as exc:
             print(f"\nError: {type(exc).__name__}: {exc}")
