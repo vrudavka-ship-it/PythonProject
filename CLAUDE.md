@@ -338,7 +338,27 @@ Research Agent потребує recursion_limit=15 (не 8) — він роби�
 - SearchMCP (8901) — один для всіх трьох ACP агентів (planner, researcher, critic)
 
 ## Відомі баги (не виправлені)
-- **HITL `edit` flow** — `KeyError: 'name'` у `HumanInTheLoopMiddleware._process_decision`.
+
+- **HITL `edit` flow (CLI)** — `KeyError: 'name'` у `HumanInTheLoopMiddleware._process_decision`.
   Файл: `main.py::_build_resume_command`.
   Причина: передаємо `{"edited_action": {"feedback": feedback}}`, а middleware очікує `{"edited_action": {"name": <tool_name>, "args": {...}}}`.
   Варіанти фіксу: (A) показати поточні args і дати редагувати filename/content окремо; (B) прибрати `edit`, залишити тільки approve/reject.
+
+- **HITL `edit` у Web UI** — кнопки тільки approve/reject, `edit` не реалізовано.
+  Файл: `app/static/index.html`, `app/api.py`.
+  Реалізувати: textarea для feedback → POST /edit → supervisor отримує revision request.
+
+- **SSE streaming per-agent** — у чаті не видно прогресу Planner→Researcher→Critic в реальному часі.
+  Зараз supervisor.stream() у sync потоці, події приходять тільки коли агент повністю завершив крок.
+  Для справжнього реалтайму потрібен streaming всередині кожного sub-агента.
+
+- **Відновлення сесії з history** — при кліку показується запит + збережений звіт, але не replay
+  повідомлень агента (tool calls, проміжні відповіді). LangGraph checkpoint в InMemorySaver губиться
+  при перезапуску — повний replay неможливий без PostgresSaver.
+
+## Бажаний функціонал (не реалізовано)
+
+- **Видалення сесії з history** — кнопка Delete поруч з кожною сесією у sidebar.
+  Видаляє запис з таблиці `research_sessions` у Postgres і відповідний `.md` файл зі звітом якщо є.
+  Ендпоінт: `DELETE /sessions/{session_id}`.
+  UI: кнопка `✕` з'являється при hover на сесію, після кліку — підтвердження і видалення.
