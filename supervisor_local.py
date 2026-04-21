@@ -1,10 +1,14 @@
 """
-Supervisor Local — hw8 архітектура без ACP/MCP серверів (homework-lesson-12).
+Supervisor Local — hw8 архітектура без ACP/MCP серверів (homework-lesson-12/13).
 
 Відрізняється від supervisor.py (hw9) тим що:
 - Sub-агенти (planner, researcher, critic) викликаються напряму як Python функції
 - save_report записує файл локально (без ReportMCP)
 - Немає залежності від зовнішніх серверів (ACP порт 8903, MCP порт 8902)
+
+Checkpointer (hw13):
+- PostgresSaver якщо Postgres доступний (стан персистентний між перезапусками)
+- InMemorySaver як fallback (локальний запуск без Docker)
 
 Langfuse tracing: промпти завантажуються з Langfuse Prompt Management.
 """
@@ -16,9 +20,18 @@ from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 
 from config import settings, SUPERVISOR_SYSTEM_PROMPT
 from langfuse_utils import get_prompt_text
+
+# DATABASE_URL_SYNC — psycopg3 формат для sync PostgresSaver.
+# У Docker — з env var, локально — fallback на localhost.
+# Sync версія не має "+asyncpg" prefix — psycopg3 читає postgresql://...
+_DB_URL_SYNC = os.environ.get(
+    "DATABASE_URL_SYNC",
+    "postgresql://research:research@localhost:5432/research_agent",
+)
 
 
 # ==============================
@@ -122,12 +135,43 @@ def save_report(filename: str, content: str) -> str:
 
 
 # ==============================
-# InMemorySaver + lazy Supervisor singleton
+# Checkpointer + lazy Supervisor singleton
 # ==============================
+
+def _make_checkpointer():
+    """
+    Створює PostgresSaver якщо Postgres доступний, інакше — InMemorySaver.
+
+    PostgresSaver — sync checkpointer для LangGraph.
+    Зберігає стан графа у таблицях langgraph_checkpoints в Postgres.
+    Персистентно між перезапусками (на відміну від InMemorySaver).
+
+    Аналогія Java:
+    - InMemorySaver = HashMap у пам'яті (губиться при restart)
+    - PostgresSaver = JPA entity у БД (живе між restarts)
+
+    from_conn_string() + setup() — створює з'єднання і DDL таблиці.
+    with PostgresSaver.from_conn_string(...) as saver — context manager,
+    але ми тримаємо його відкритим на весь час роботи застосунку (singleton).
+    """
+    try:
+        # PostgresSaver.from_conn_string() повертає context manager.
+        # __enter__() — відкриває з'єднання.
+        # Аналогія Java: DataSource.getConnection() з пулом.
+        conn = PostgresSaver.from_conn_string(_DB_URL_SYNC)
+        saver = conn.__enter__()
+        # setup() — CREATE TABLE IF NOT EXISTS для langgraph_checkpoints
+        saver.setup()
+        print("[supervisor] PostgresSaver connected")
+        return saver
+    except Exception as e:
+        print(f"[supervisor] Postgres unavailable ({e}), using InMemorySaver")
+        return InMemorySaver()
+
 
 # Checkpointer — зберігає стан між interrupt і resume для HITL
 # Аналогія Java: HttpSession або StatefulBean
-_checkpointer = InMemorySaver()
+_checkpointer = _make_checkpointer()
 _supervisor = None
 
 

@@ -297,72 +297,83 @@ def _run_supervisor_sync(
         return future.result(timeout=300)  # 5 хвилин таймаут
 
     try:
-        # Lazy import supervisor_local (hw8 архітектура — без ACP/MCP серверів)
-        # supervisor_local використовує InMemorySaver.
-        # У production — замінити на AsyncPostgresSaver.
         from supervisor_local import get_supervisor
+        from langfuse_utils import langfuse_handler
+        from langfuse import propagate_attributes
 
         supervisor = get_supervisor()
 
         config = {
             "configurable": {"thread_id": session_id},
             "recursion_limit": 40,
+            # callbacks — прокидаємо Langfuse handler щоб LangChain трейсив усі виклики
+            # Аналогія Java: MDC (Mapped Diagnostic Context) для structured logging
+            "callbacks": [langfuse_handler],
         }
 
-        for step in supervisor.stream(
-            {"messages": [{"role": "user", "content": query}]},
-            config,
-            stream_mode="updates",
+        # propagate_attributes — прив'язує session_id і user_id до всіх Langfuse трейсів
+        # що генеруються всередині цього контекстного менеджера.
+        # Аналогія Java: MDC.put("sessionId", ...) перед блоком логування.
+        with propagate_attributes(
+            session_id=session_id,
+            user_id="web-ui",
+            tags=["supervisor", "web-ui", "hw13"],
+            metadata={"thread_id": session_id},
         ):
-            if "__interrupt__" in step:
-                # HITL interrupt — витягуємо деталі і відправляємо у браузер
-                interrupts = step["__interrupt__"]
-                interrupt_value = interrupts[0].value
+            for step in supervisor.stream(
+                {"messages": [{"role": "user", "content": query}]},
+                config,
+                stream_mode="updates",
+            ):
+                if "__interrupt__" in step:
+                    # HITL interrupt — витягуємо деталі і відправляємо у браузер
+                    interrupts = step["__interrupt__"]
+                    interrupt_value = interrupts[0].value
 
-                filename = ""
-                content = ""
-                for req in interrupt_value.get("action_requests", []):
-                    args = req.get("args") or req.get("tool_input", {})
-                    filename = args.get("filename", "report.md")
-                    content = args.get("content", "")
+                    filename = ""
+                    content = ""
+                    for req in interrupt_value.get("action_requests", []):
+                        args = req.get("args") or req.get("tool_input", {})
+                        filename = args.get("filename", "report.md")
+                        content = args.get("content", "")
 
-                # Відправляємо подію hitl_interrupt у браузер
-                put_event({
-                    "event": "hitl_interrupt",
-                    "data": json.dumps({
-                        "filename": filename,
-                        "preview": content[:1000],
-                        "content": content,
-                        "content_length": len(content),
-                    }),
-                })
-
-                # Чекаємо рішення від POST /approve або /reject
-                decision = get_hitl_decision()
-
-                if decision == "approve":
+                    # Відправляємо подію hitl_interrupt у браузер
                     put_event({
-                        "event": "hitl_resolved",
-                        "data": json.dumps({"decision": "approve", "filename": filename}),
+                        "event": "hitl_interrupt",
+                        "data": json.dumps({
+                            "filename": filename,
+                            "preview": content[:1000],
+                            "content": content,
+                            "content_length": len(content),
+                        }),
                     })
-                    resume_data = {"decisions": [{"type": "approve"}]}
-                else:  # reject
-                    put_event({
-                        "event": "hitl_resolved",
-                        "data": json.dumps({"decision": "reject"}),
-                    })
-                    resume_data = {"decisions": [{"type": "reject", "message": "User rejected"}]}
 
-                # Відновлюємо граф після HITL
-                for resume_step in supervisor.stream(
-                    Command(resume=resume_data),
-                    config,
-                    stream_mode="updates",
-                ):
-                    _process_step(resume_step, put_event, session_id, loop, decision == "approve")
+                    # Чекаємо рішення від POST /approve або /reject
+                    decision = get_hitl_decision()
 
-            else:
-                _process_step(step, put_event, session_id, loop, False)
+                    if decision == "approve":
+                        put_event({
+                            "event": "hitl_resolved",
+                            "data": json.dumps({"decision": "approve", "filename": filename}),
+                        })
+                        resume_data = {"decisions": [{"type": "approve"}]}
+                    else:  # reject
+                        put_event({
+                            "event": "hitl_resolved",
+                            "data": json.dumps({"decision": "reject"}),
+                        })
+                        resume_data = {"decisions": [{"type": "reject", "message": "User rejected"}]}
+
+                    # Відновлюємо граф після HITL
+                    for resume_step in supervisor.stream(
+                        Command(resume=resume_data),
+                        config,
+                        stream_mode="updates",
+                    ):
+                        _process_step(resume_step, put_event, session_id, loop, decision == "approve")
+
+                else:
+                    _process_step(step, put_event, session_id, loop, False)
 
     except Exception as exc:
         put_event({
