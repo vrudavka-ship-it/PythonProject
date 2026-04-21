@@ -367,6 +367,53 @@ function onNewChat() {
 
 
 // ─── History Sidebar ─────────────────────────────────────────
+
+/**
+ * Завантажує стару сесію при кліку у sidebar.
+ * Показує запит у chat і звіт у preview (якщо є).
+ * Нового стріму не запускає — це read-only перегляд.
+ */
+async function loadSession(session, liEl) {
+  // Якщо зараз щось виконується — не перемикаємось
+  if (state.busy) return;
+
+  // Скидаємо поточний стан
+  if (state.es) { state.es.close(); state.es = null; }
+  hideHitlCard();
+  clearChat();
+  clearPreview();
+
+  // Позначаємо сесію активною в sidebar
+  state.sessionId = session.session_id;
+  document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
+  liEl.classList.add("active");
+
+  // Показуємо запит у чаті
+  appendUserMessage(session.query);
+  appendSystemMessage(`Збережена сесія від ${session.created_at ? new Date(session.created_at).toLocaleString("uk-UA") : "невідомий час"}`);
+
+  // Завантажуємо деталі + вміст звіту з сервера
+  try {
+    const resp = await fetch(`/sessions/${encodeURIComponent(session.session_id)}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    if (data.report_content) {
+      // Є збережений звіт — показуємо в preview
+      updatePreview(data.report_content);
+      appendSystemMessage(`✓ Звіт збережено: ${data.report_path}`);
+
+      // Кнопка Download — беремо тільки filename з повного шляху
+      const filename = data.report_path.split("/").pop();
+      showDownloadButton(filename);
+    } else {
+      appendSystemMessage("Звіт для цієї сесії не збережено.");
+    }
+  } catch (err) {
+    appendSystemMessage(`Помилка завантаження сесії: ${err}`, true);
+  }
+}
+
 async function fetchSessions() {
   try {
     const resp = await fetch("/sessions?limit=20");
@@ -394,10 +441,7 @@ async function fetchSessions() {
         <div class="session-time">${timeStr}${s.report_path ? " ✓" : ""}</div>
       `;
 
-      li.addEventListener("click", () => {
-        // При кліку на сесію — показуємо query (повне відновлення поза скопом hw13)
-        appendSystemMessage(`Session: ${s.query}`, false);
-      });
+      li.addEventListener("click", () => loadSession(s, li));
 
       sessionList.appendChild(li);
     }

@@ -512,12 +512,30 @@ async def list_sessions(limit: int = Query(default=20, le=100)):
 
 @app.get("/sessions/{session_id}")
 async def get_session(session_id: str):
-    """Повертає метадані однієї сесії."""
-    sessions = await get_sessions(100)
+    """Повертає метадані однієї сесії + вміст звіту якщо є."""
+    try:
+        sessions = await get_sessions(100)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
     for s in sessions:
         if s["session_id"] == session_id:
             if isinstance(s.get("created_at"), datetime):
                 s["created_at"] = s["created_at"].isoformat()
+
+            # Якщо є збережений звіт — читаємо його вміст
+            report_path = s.get("report_path")
+            if report_path:
+                p = Path(report_path)
+                if not p.is_absolute():
+                    p = Path(settings.output_dir) / report_path
+                try:
+                    s["report_content"] = p.read_text(encoding="utf-8")
+                except OSError:
+                    s["report_content"] = None
+            else:
+                s["report_content"] = None
+
             return JSONResponse(s)
     raise HTTPException(status_code=404, detail="Session not found")
 
