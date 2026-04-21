@@ -25,10 +25,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # якщо requirements.txt не змінився (не перевстановлює залежності при кожному build)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-# langchain==1.2.x тягне langgraph на новішу версію як залежність.
-# Примусово повертаємо langgraph==1.0.2 — версію з якою побудована вся система.
-# --no-deps щоб pip не намагався оновити залежності langgraph.
-RUN pip install --no-cache-dir --no-deps langgraph==1.0.2
+# langgraph-prebuilt тягнеться як залежність langchain і встановлюється в новій версії
+# яка імпортує ExecutionInfo — символ відсутній у langgraph==1.0.2.
+# Фіксуємо сумісну версію що не має цього імпорту.
+RUN pip install --no-cache-dir "langgraph-prebuilt==1.0.1"
+# hw13: Web UI залежності (не в requirements.txt — не потрібні для CLI/тестів)
+RUN pip install --no-cache-dir \
+    fastapi==0.115.12 \
+    "uvicorn[standard]==0.35.0" \
+    sse-starlette==2.3.6 \
+    asyncpg==0.30.0 \
+    "psycopg[binary,pool]==3.2.9"
 
 # Копіюємо весь код проєкту
 COPY . .

@@ -30,11 +30,3 @@ deepeval==3.9.5
 ragas==0.4.3
 # homework-lesson-12: observability
 langfuse==4.3.1
-# homework-lesson-13: Web UI + Docker + Postgres
-fastapi==0.115.12
-uvicorn[standard]==0.35.0
-sse-starlette==2.3.6
-asyncpg==0.30.0
-psycopg[binary,pool]==3.2.9
-# langgraph-checkpoint-postgres несумісний з langgraph==1.0.2 (версійний конфлікт)
-# Сесії зберігаються через session_store.py (asyncpg + Postgres напряму)
