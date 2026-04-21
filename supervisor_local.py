@@ -20,18 +20,9 @@ from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.checkpoint.postgres import PostgresSaver
 
 from config import settings, SUPERVISOR_SYSTEM_PROMPT
 from langfuse_utils import get_prompt_text
-
-# DATABASE_URL_SYNC — psycopg3 формат для sync PostgresSaver.
-# У Docker — з env var, локально — fallback на localhost.
-# Sync версія не має "+asyncpg" prefix — psycopg3 читає postgresql://...
-_DB_URL_SYNC = os.environ.get(
-    "DATABASE_URL_SYNC",
-    "postgresql://research:research@localhost:5432/research_agent",
-)
 
 
 # ==============================
@@ -138,40 +129,13 @@ def save_report(filename: str, content: str) -> str:
 # Checkpointer + lazy Supervisor singleton
 # ==============================
 
-def _make_checkpointer():
-    """
-    Створює PostgresSaver якщо Postgres доступний, інакше — InMemorySaver.
-
-    PostgresSaver — sync checkpointer для LangGraph.
-    Зберігає стан графа у таблицях langgraph_checkpoints в Postgres.
-    Персистентно між перезапусками (на відміну від InMemorySaver).
-
-    Аналогія Java:
-    - InMemorySaver = HashMap у пам'яті (губиться при restart)
-    - PostgresSaver = JPA entity у БД (живе між restarts)
-
-    from_conn_string() + setup() — створює з'єднання і DDL таблиці.
-    with PostgresSaver.from_conn_string(...) as saver — context manager,
-    але ми тримаємо його відкритим на весь час роботи застосунку (singleton).
-    """
-    try:
-        # PostgresSaver.from_conn_string() повертає context manager.
-        # __enter__() — відкриває з'єднання.
-        # Аналогія Java: DataSource.getConnection() з пулом.
-        conn = PostgresSaver.from_conn_string(_DB_URL_SYNC)
-        saver = conn.__enter__()
-        # setup() — CREATE TABLE IF NOT EXISTS для langgraph_checkpoints
-        saver.setup()
-        print("[supervisor] PostgresSaver connected")
-        return saver
-    except Exception as e:
-        print(f"[supervisor] Postgres unavailable ({e}), using InMemorySaver")
-        return InMemorySaver()
-
-
-# Checkpointer — зберігає стан між interrupt і resume для HITL
-# Аналогія Java: HttpSession або StatefulBean
-_checkpointer = _make_checkpointer()
+# Checkpointer — зберігає стан між interrupt і resume для HITL.
+# InMemorySaver — стан живе в RAM поки контейнер запущений.
+# Примітка: langgraph-checkpoint-postgres несумісний з langgraph==1.0.2,
+# тому використовуємо InMemorySaver. Metadata сесій зберігається у Postgres
+# через session_store.py (окрема таблиця research_sessions).
+# Аналогія Java: HttpSession (живе поки сервер запущений)
+_checkpointer = InMemorySaver()
 _supervisor = None
 
 

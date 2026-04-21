@@ -376,6 +376,8 @@ def _run_supervisor_sync(
                     _process_step(step, put_event, session_id, loop, False)
 
     except Exception as exc:
+        import traceback
+        traceback.print_exc()  # виводимо повний stacktrace у docker logs
         put_event({
             "event": "error",
             "data": json.dumps({"message": f"{type(exc).__name__}: {exc}"}),

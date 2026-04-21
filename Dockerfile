@@ -26,16 +26,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Додаємо нові залежності для Web UI + Postgres
-# (вони ще не в requirements.txt — встановлюємо тут)
-RUN pip install --no-cache-dir \
-    fastapi==0.115.12 \
-    uvicorn[standard]==0.35.0 \
-    psycopg[binary,pool]==3.2.9 \
-    langgraph-checkpoint-postgres==2.0.21 \
-    sse-starlette==2.3.6 \
-    asyncpg==0.30.0
-
 # Копіюємо весь код проєкту
 COPY . .
 

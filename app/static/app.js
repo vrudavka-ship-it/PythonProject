@@ -160,9 +160,11 @@ function startStream(query) {
   });
 
   // error від сервера (не мережева помилка)
-  es.addEventListener("error_event", (e) => {
-    const data = JSON.parse(e.data);
-    appendSystemMessage(`⚠ Error: ${data.message}`, true);
+  es.addEventListener("error", (e) => {
+    if (e.data) {
+      const data = JSON.parse(e.data);
+      appendSystemMessage(`⚠ Error: ${data.message}`, true);
+    }
   });
 
   // Мережева помилка EventSource (з'єднання упало)
