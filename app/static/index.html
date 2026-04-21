@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Research Agent</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- marked.js — Markdown → HTML рендерер (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════════ -->
+<header class="header">
+  <span class="header-title">Research Agent</span>
+  <button class="btn btn-ghost" id="btn-new-chat" title="New Chat">+ New Chat</button>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════
+     MAIN LAYOUT: 3 колонки
+     [History | Chat/Log | Report Preview]
+════════════════════════════════════════════════════════════ -->
+<main class="layout">
+
+  <!-- ────────────────────────────────────────────────
+       КОЛОНКА 1: History sidebar
+  ──────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">History</div>
+    <ul class="session-list" id="session-list">
+      <!-- Заповнюється через JS fetchSessions() -->
+      <li class="session-item placeholder">Loading...</li>
+    </ul>
+  </aside>
+
+  <!-- ────────────────────────────────────────────────
+       КОЛОНКА 2: Chat / Log
+  ──────────────────────────────────────────────── -->
+  <section class="chat-panel">
+    <div class="chat-log" id="chat-log">
+      <div class="welcome-msg">
+        <p>Введи запит нижче щоб почати дослідження.</p>
+        <p class="hint">Приклад: <em>What is RAG and how does it work?</em></p>
+      </div>
+    </div>
+
+    <!-- HITL картка — показується при interrupt (прихована за замовчуванням) -->
+    <div class="hitl-card" id="hitl-card" style="display:none">
+      <div class="hitl-header">⏸ Action requires approval</div>
+      <div class="hitl-body">
+        <p>
+          Save report as: <strong id="hitl-filename"></strong>
+          (<span id="hitl-size"></span> chars)
+        </p>
+        <pre class="hitl-preview" id="hitl-preview"></pre>
+      </div>
+      <div class="hitl-actions">
+        <button class="btn btn-approve" id="btn-approve">✓ Approve</button>
+        <button class="btn btn-reject" id="btn-reject">✗ Reject</button>
+      </div>
+    </div>
+
+    <!-- Інпут -->
+    <form class="input-bar" id="input-form">
+      <textarea
+        id="query-input"
+        class="query-textarea"
+        placeholder="Введи дослідницький запит..."
+        rows="2"
+        autofocus
+      ></textarea>
+      <button type="submit" class="btn btn-send" id="btn-send">▶</button>
+    </form>
+  </section>
+
+  <!-- ────────────────────────────────────────────────
+       КОЛОНКА 3: Report Preview
+  ──────────────────────────────────────────────── -->
+  <section class="preview-panel">
+    <div class="preview-header">
+      <span>Report Preview</span>
+      <button class="btn btn-ghost btn-sm" id="btn-download" style="display:none">
+        ⬇ Download .md
+      </button>
+    </div>
+    <div class="preview-content" id="preview-content">
+      <p class="placeholder">Звіт з'явиться тут після завершення дослідження.</p>
+    </div>
+  </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

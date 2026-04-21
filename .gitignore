@@ -26,3 +26,9 @@ env/
 faiss_index/
 lectures/client_secret.json
 lectures/token.json
+
+# Docker
+postgres_data/
+
+# Output звіти (генеруються агентом)
+output/*.md

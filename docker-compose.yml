@@ -1,0 +1,62 @@
+version: "3.9"
+
+# Docker Compose — декларативний опис сервісів.
+# Аналогія Java: application.properties для multi-module Spring Boot з різними JVM процесами.
+#
+# Сервіси:
+#   postgres — база даних для LangGraph checkpoints (сесії, стан агента)
+#   app      — FastAPI бекенд (Research Agent Web UI)
+
+services:
+
+  # ─────────────────────────────────────────────────────────────
+  # Postgres — персистентне сховище стану LangGraph
+  # ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine          # легкий образ, Alpine Linux
+    container_name: research_postgres
+    environment:
+      POSTGRES_DB: research_agent      # назва БД
+      POSTGRES_USER: research          # логін
+      POSTGRES_PASSWORD: research      # пароль (dev-only, в prod — secrets)
+    ports:
+      - "5432:5432"                    # прокидаємо порт для локального psql/pgAdmin
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # персистентний том — дані не губляться при restart
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research -d research_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─────────────────────────────────────────────────────────────
+  # FastAPI застосунок — Research Agent Web UI
+  # ─────────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: research_app
+    ports:
+      - "8000:8000"                    # FastAPI на 8000
+    env_file:
+      - .env                           # OPENAI_API_KEY, TAVILY_API_KEY, LANGFUSE_*
+    environment:
+      # DATABASE_URL — PostgreSQL connection string для LangGraph checkpoint
+      # asyncpg — async Postgres драйвер (аналог JDBC AsyncDriver у Java)
+      DATABASE_URL: "postgresql+asyncpg://research:research@postgres:5432/research_agent"
+      # Sync версія для міграцій (psycopg2 / psycopg3)
+      DATABASE_URL_SYNC: "postgresql://research:research@postgres:5432/research_agent"
+      OUTPUT_DIR: /app/output
+    volumes:
+      - ./output:/app/output           # звіти зберігаються локально
+      - ./faiss_index:/app/faiss_index # FAISS індекс — не перебудовуємо при кожному restart
+    depends_on:
+      postgres:
+        condition: service_healthy     # чекаємо поки postgres готовий приймати з'єднання
+
+# ─────────────────────────────────────────────────────────────
+# Volumes — іменовані Docker volumes для персистентності
+# ─────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
