@@ -6,6 +6,28 @@
 
 ---
 
+## Архітектура (lesson-13: Web UI + Docker + Postgres)
+
+```
+Browser
+  │  EventSource /stream?query=...  (SSE)
+  │  POST /approve | /reject        (HITL)
+  ▼
+FastAPI (app/api.py)  ──► asyncpg ──► Postgres (research_sessions)
+  │
+  ▼ asyncio.to_thread()
+supervisor_local.py (sync)
+  │  InMemorySaver (HITL стан)
+  ├── plan()      → agents/planner.py
+  ├── research()  → agents/research.py
+  ├── critique()  → agents/critic.py
+  └── save_report() → output/*.md
+```
+
+UI — 3 колонки: **History sidebar** | **Chat/Log** (SSE стрімінг) | **Report Preview** (marked.js)
+
+---
+
 ## Архітектура (lesson-9: MCP + ACP)
 
 ```
@@ -38,6 +60,13 @@ Supervisor Agent (локальний, create_agent + HITL)
 
 ```text
 PythonProject/
+├── app/                     # Web UI (hw13)
+│   ├── api.py               # FastAPI: SSE /stream, /approve, /reject, /sessions
+│   ├── session_store.py     # asyncpg + Postgres таблиця research_sessions
+│   ├── checkpoint.py        # AsyncPostgresSaver (підготовлено, не активовано)
+│   └── static/              # index.html + style.css + app.js
+├── docker-compose.yml       # postgres + app сервіси (hw13)
+├── Dockerfile               # python:3.11-slim + uvicorn (hw13)
 ├── main.py                  # REPL (hw9: Supervisor + HITL через MCP+ACP)
 ├── main_supervisor.py       # REPL (hw8: backup, без MCP/ACP)
 ├── supervisor.py            # Supervisor Agent + ACP delegation tools
@@ -85,7 +114,22 @@ PythonProject/
 
 ---
 
-## Встановлення
+## Запуск (hw13 — Web UI)
+
+```bash
+# Docker — рекомендований спосіб (Postgres + FastAPI в одній команді)
+docker compose up --build
+# → http://localhost:8000
+```
+
+Або локально без Docker (history sidebar не працює — немає Postgres):
+```bash
+uvicorn app.api:app --host 0.0.0.0 --port 8000
+```
+
+---
+
+## Встановлення (CLI / тести)
 
 ```bash
 python3.13 -m venv .venv
@@ -335,5 +379,5 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 - логування через `print()` (Langfuse трейсинг додано в hw12)
 - немає кешування результатів пошуку між запитами
 - CrossEncoder модель завантажується при першому виклику (~30 сек)
-- пам'ять між сесіями не зберігається (`InMemorySaver` — тільки в межах процесу)
+- LangGraph стан (`InMemorySaver`) губиться при перезапуску контейнера — `langgraph-checkpoint-postgres` несумісний з `langgraph==1.0.2`; metadata сесій (запит, час, звіт) зберігається у Postgres
 - кожен ACP агент відкриває новий MCP client на кожен запит (немає connection pooling)

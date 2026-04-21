@@ -22,7 +22,8 @@ Research Agent — навчальний Python-проєкт. Vasyl вивчає 
 - **Урок 8** — виконано, змержено в master, тег є
 - **Урок 9** — виконано, змержено в master, тег є
 - **Урок 10** — виконано, змержено в master, тег `homework-lesson-10` є (коміт `2ba53ac`)
-- **Урок 12** — виконано (гілка `homework-lesson-12`). Langfuse observability: tracing, session/user tracking, Prompt Management (4 промпти), LLM-as-a-Judge (2 evaluators). Мерж і тег ще не зроблено.
+- **Урок 12** — виконано, змержено в master, тег є. Langfuse observability: tracing, session/user tracking, Prompt Management (4 промпти), LLM-as-a-Judge (2 evaluators).
+- **Урок 13** — в процесі (гілка `homework-lesson-13`). Web UI + Docker + Postgres. Мерж і тег ще не зроблено.
 
 ## Langfuse observability (lesson-12)
 - `langfuse_utils.py` — Langfuse клієнт singleton, CallbackHandler, get_prompt_text()
@@ -35,33 +36,70 @@ Research Agent — навчальний Python-проєкт. Vasyl вивчає 
 ## Файлова структура проєкту
 ```
 PythonProject/
-├── langfuse_utils.py    # Langfuse client singleton, CallbackHandler, get_prompt_text() (hw12)
-├── main.py              # REPL loop (hw9: Supervisor + HITL через MCP+ACP)
-├── main_supervisor.py   # REPL loop (hw8: Supervisor + HITL, збережено як backup)
-├── agent.py             # Власний ReAct loop (прямий виклик OpenAI API)
-├── supervisor.py        # Supervisor Agent + ACP delegation tools (hw9)
-├── acp_server.py        # ACP сервер: planner, researcher, critic (hw9)
-├── mcp_utils.py         # mcp_tools_to_langchain() helper (hw9)
+├── app/                     # Web UI (hw13)
+│   ├── api.py               # FastAPI: SSE /stream, /approve, /reject, /sessions
+│   ├── session_store.py     # asyncpg + таблиця research_sessions у Postgres
+│   ├── checkpoint.py        # AsyncPostgresSaver (готовий, не підключений — версійний конфлікт)
+│   └── static/              # Фронтенд
+│       ├── index.html       # 3-колонковий лейаут: History | Chat | Report Preview
+│       ├── style.css        # Темна тема, кольори per-agent
+│       └── app.js           # SSE клієнт, HITL картка, marked.js Markdown preview
+├── docker-compose.yml       # postgres:16-alpine + FastAPI app (hw13)
+├── Dockerfile               # python:3.11-slim, uvicorn (hw13)
+├── langfuse_utils.py        # Langfuse client singleton, CallbackHandler, get_prompt_text() (hw12)
+├── supervisor_local.py      # Supervisor без ACP/MCP — використовується в Web UI (hw13)
+├── main.py                  # REPL loop (hw9: Supervisor + HITL через MCP+ACP)
+├── main_supervisor.py       # REPL loop (hw8: Supervisor + HITL, збережено як backup)
+├── agent.py                 # Власний ReAct loop (прямий виклик OpenAI API)
+├── supervisor.py            # Supervisor Agent + ACP delegation tools (hw9)
+├── acp_server.py            # ACP сервер: planner, researcher, critic (hw9)
+├── mcp_utils.py             # mcp_tools_to_langchain() helper (hw9)
 ├── mcp_servers/
-│   ├── search_mcp.py    # SearchMCP порт 8901: web_search, read_url, knowledge_search (hw9)
-│   └── report_mcp.py    # ReportMCP порт 8902: save_report (hw9)
-├── schemas.py           # Pydantic models: ResearchPlan, CritiqueResult (hw8)
-├── agents/              # Sub-agents (hw8)
+│   ├── search_mcp.py        # SearchMCP порт 8901: web_search, read_url, knowledge_search (hw9)
+│   └── report_mcp.py        # ReportMCP порт 8902: save_report (hw9)
+├── schemas.py               # Pydantic models: ResearchPlan, CritiqueResult (hw8)
+├── agents/                  # Sub-agents (hw8)
 │   ├── __init__.py
-│   ├── planner.py       # Planner Agent → ResearchPlan
-│   ├── research.py      # Research Agent (перевикористання hw5 tools)
-│   └── critic.py        # Critic Agent → CritiqueResult
-├── tools.py             # Реалізація tools + TOOLS_SCHEMA (JSON Schema) + TOOLS_MAP
-├── config.py            # Налаштування (.env), бібліотека system prompts, константи
-├── retriever.py         # Hybrid Retrieval: BM25 + Vector + CrossEncoder Reranking
-├── ingest.py            # Ingestion pipeline: PDF → chunks → embeddings → FAISS
+│   ├── planner.py           # Planner Agent → ResearchPlan
+│   ├── research.py          # Research Agent (перевикористання hw5 tools)
+│   └── critic.py            # Critic Agent → CritiqueResult
+├── tools.py                 # Реалізація tools + TOOLS_SCHEMA (JSON Schema) + TOOLS_MAP
+├── config.py                # Налаштування (.env), бібліотека system prompts, константи
+├── retriever.py             # Hybrid Retrieval: BM25 + Vector + CrossEncoder Reranking
+├── ingest.py                # Ingestion pipeline: PDF → chunks → embeddings → FAISS
 ├── requirements.txt
-├── data/                # PDF-документи для ingestion (не комітяться — тільки локально)
-├── faiss_index/         # FAISS-індекс на диску (в .gitignore — генерується через ingest.py)
-├── output/              # Звіти (зберігаються через save_report після HITL approve)
-├── homework/            # Умови домашніх завдань
-└── lectures/            # Тексти лекцій
+├── data/                    # PDF-документи для ingestion (не комітяться — тільки локально)
+├── faiss_index/             # FAISS-індекс на диску (в .gitignore — генерується через ingest.py)
+├── output/                  # Звіти (зберігаються через save_report після HITL approve)
+├── homework/                # Умови домашніх завдань
+└── lectures/                # Тексти лекцій
 ```
+
+## Web UI + Docker + Postgres (lesson-13)
+- `docker-compose.yml` — два сервіси: `postgres:16-alpine` + `app` (FastAPI)
+- `Dockerfile` — `python:3.11-slim`, встановлює requirements + hw13 залежності окремим шаром
+- `app/api.py` — FastAPI: SSE `/stream`, `POST /approve`, `POST /reject`, `GET /sessions`, `GET /reports/{file}`
+- `app/session_store.py` — asyncpg пул + таблиця `research_sessions` (metadata сесій)
+- `app/static/` — Vanilla JS + CSS Grid, 3 колонки, marked.js для Markdown preview
+- Supervisor використовує `supervisor_local.py` (hw8 архітектура, без ACP/MCP)
+- Langfuse tracing прокинутий у Web UI: `callbacks=[langfuse_handler]` + `propagate_attributes`
+- HITL через asyncio.Queue: SSE generator чекає рішення від POST /approve або /reject
+
+### Запуск
+```bash
+# З Docker (повна система з Postgres):
+docker compose up --build
+# → http://localhost:8000
+
+# Локально (без Postgres — history sidebar вимкнено):
+uvicorn app.api:app --host 0.0.0.0 --port 8000
+```
+
+### Важлива деталь: версійний конфлікт langgraph-prebuilt
+`langgraph-prebuilt>=1.0.2` імпортує `ExecutionInfo` з `langgraph.runtime` — символ відсутній у `langgraph==1.0.2`.
+В Dockerfile фіксуємо `langgraph-prebuilt==1.0.1` окремим `RUN pip install` після основних залежностей.
+`langgraph-checkpoint-postgres` також несумісний з `langgraph==1.0.2` — тому LangGraph стан зберігається
+в `InMemorySaver`, а metadata сесій — в Postgres через `asyncpg` напряму (таблиця `research_sessions`).
 
 ## Технології
 - Python 3.13
