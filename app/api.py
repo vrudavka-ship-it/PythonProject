@@ -527,8 +527,12 @@ async def get_session(session_id: str):
             report_path = s.get("report_path")
             if report_path:
                 p = Path(report_path)
-                if not p.is_absolute():
-                    p = Path(settings.output_dir) / report_path
+                # report_path може бути "output/file.md" або просто "file.md"
+                # пробуємо спочатку як є, потім з output_dir prefix
+                if not p.exists():
+                    p = _project_root / report_path
+                if not p.exists():
+                    p = Path(settings.output_dir) / Path(report_path).name
                 try:
                     s["report_content"] = p.read_text(encoding="utf-8")
                 except OSError:
