@@ -25,6 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # якщо requirements.txt не змінився (не перевстановлює залежності при кожному build)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# langchain==1.2.x тягне langgraph на новішу версію як залежність.
+# Примусово повертаємо langgraph==1.0.2 — версію з якою побудована вся система.
+# --no-deps щоб pip не намагався оновити залежності langgraph.
+RUN pip install --no-cache-dir --no-deps langgraph==1.0.2
 
 # Копіюємо весь код проєкту
 COPY . .
