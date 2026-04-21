@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Docker Compose — декларативний опис сервісів.
 # Аналогія Java: application.properties для multi-module Spring Boot з різними JVM процесами.
 #
